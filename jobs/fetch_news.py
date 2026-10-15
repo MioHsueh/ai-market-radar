@@ -194,33 +194,78 @@ def _xml_text(element, names):
 
 
 def fetch_rss_feed(feed, target_day):
-    response = requests.get(feed["url"], headers=HEADERS, timeout=TIMEOUT)
+    response = requests.get(
+        feed["url"],
+        headers=HEADERS,
+        timeout=TIMEOUT,
+    )
     response.raise_for_status()
+
     root = ET.fromstring(response.content)
-    items = root.findall(".//item")
-    # Atom feeds sometimes use namespaces; support common Atom item structure too.
-    if not items:
-        items = root.findall(".//{http://www.w3.org/2005/Atom}entry")
+    entries = root.findall(".//item")
+
+    # 支援 Atom 格式
+    if not entries:
+        entries = root.findall(
+            ".//{http://www.w3.org/2005/Atom}entry"
+        )
 
     results = []
-    for entry in items:
-        title = _xml_text(entry, ["title", "{http://www.w3.org/2005/Atom}title"])
+    missing_date = 0
+    unparsed_date = 0
+    parsed_dates = Counter()
+    samples = []
+
+    for entry in entries:
+        title = _xml_text(
+            entry,
+            ["title", "{http://www.w3.org/2005/Atom}title"],
+        )
+
         link = _xml_text(entry, ["link"])
         if not link:
-            atom_link = entry.find("{http://www.w3.org/2005/Atom}link")
+            atom_link = entry.find(
+                "{http://www.w3.org/2005/Atom}link"
+            )
             if atom_link is not None:
                 link = atom_link.attrib.get("href", "")
-        published = (
-            _xml_text(entry, ["pubDate", "published", "updated",
-                              "{http://www.w3.org/2005/Atom}published",
-                              "{http://www.w3.org/2005/Atom}updated"])
+
+        published = _xml_text(
+            entry,
+            [
+                "pubDate",
+                "published",
+                "updated",
+                "{http://www.w3.org/2005/Atom}published",
+                "{http://www.w3.org/2005/Atom}updated",
+            ],
         )
+
         summary = _xml_text(
             entry,
-            ["description", "summary", "{http://www.w3.org/2005/Atom}summary"],
+            [
+                "description",
+                "summary",
+                "{http://www.w3.org/2005/Atom}summary",
+            ],
         )
-        if not title or _parse_published_date(published) != target_day:
+
+        if not published:
+            missing_date += 1
             continue
+
+        parsed_day = _parse_published_date(published)
+        if parsed_day is None:
+            unparsed_date += 1
+            if len(samples) < 3:
+                samples.append(repr(published)[:100])
+            continue
+
+        parsed_dates[parsed_day.isoformat()] += 1
+
+        if parsed_day != target_day or not title:
+            continue
+
         item = _normalise(
             feed["market"],
             feed["name"],
@@ -231,7 +276,25 @@ def fetch_rss_feed(feed, target_day):
         )
         if item and _is_target_day(item, target_day):
             results.append(item)
-    return results
+
+    latest_dates = sorted(parsed_dates.keys(), reverse=True)[:5]
+
+    diagnostic = (
+        f'{feed["name"]}：HTTP {response.status_code}；'
+        f'文章總數 {len(entries)}；'
+        f'符合目標日期 {len(results)}；'
+        f'缺少日期 {missing_date}；'
+        f'日期解析失敗 {unparsed_date}；'
+        f'來源日期樣本 {latest_dates or "無"}'
+    )
+
+    if samples:
+        diagnostic += f"；無法解析的日期樣本 {samples}"
+
+    if not entries:
+        diagnostic += "；警告：回應中沒有找到 RSS item 或 Atom entry"
+
+    return results, diagnostic
 
 
 def fetch_all_rss(target_day):

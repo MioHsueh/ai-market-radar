@@ -1,4 +1,4 @@
-"""Fetch Taiwan exchange news with correct subject parsing, plus optional US news."""
+"""Fetch Taiwan exchange news with bounded HTTP timeouts and progress callbacks."""
 import hashlib
 import os
 import re
@@ -11,11 +11,16 @@ from services.storage import save_news, save_job_run
 
 TWSE_BASE = "https://openapi.twse.com.tw/v1"
 TIMEOUT = (5, 25)
-HEADERS = {"User-Agent": "AI-Market-Radar/1.2 (market research dashboard)"}
+HEADERS = {"User-Agent": "AI-Market-Radar/1.3 (market research dashboard)"}
+
+
+def _progress(callback, message):
+    if callback:
+        callback(message)
+    print(f"[fetch_news] {message}", flush=True)
 
 
 def _field(row, *keywords):
-    """Find fields despite trailing spaces or slight label variations."""
     for key, value in row.items():
         normalized = re.sub(r"\s+", "", str(key)).casefold()
         if all(re.sub(r"\s+", "", word).casefold() in normalized for word in keywords):
@@ -35,7 +40,7 @@ def _pick(row, keys):
 def _normalise_date(value):
     value = (value or "").strip()
     digits = re.sub(r"\D", "", value)
-    if len(digits) == 7:  # ROC yyyMMdd
+    if len(digits) == 7:
         return f"{int(digits[:3]) + 1911:04d}-{int(digits[3:5]):02d}-{int(digits[5:]):02d}"
     if len(digits) == 8 and ("/" in value or "-" in value or value.isdigit()):
         return f"{digits[:4]}-{digits[4:6]}-{digits[6:8]}"
@@ -81,15 +86,12 @@ def fetch_twse_endpoint(path, source_label, kind):
         else:
             company = _field(row, "公司代號")
             company_name = _field(row, "公司名稱") or _field(row, "公司簡稱")
-            # The official API's key can be '主旨 ' with a trailing space.
             subject = _field(row, "主旨") or _field(row, "重大訊息主旨") or _field(row, "Subject")
             if not subject:
-                # Never use 事實發生日 as the headline; skip if no real subject.
                 continue
             title = f"{company_name}（{company}）：{subject}" if company_name and company else (f"{company}：{subject}" if company else subject)
             date_value = _field(row, "發言日期") or _field(row, "出表日期") or _field(row, "公告日期")
             time_value = _field(row, "發言時間")
-            # If the API supplies HHMMSS as digits, append a normalized clock time.
             time_digits = re.sub(r"\D", "", time_value)
             if date_value and len(time_digits) in (5, 6):
                 time_digits = time_digits.zfill(6)
@@ -130,7 +132,12 @@ def fetch_us_news():
             api_key = ""
     if not api_key:
         return [], ["未設定 STOCKNEWS_API_KEY；美股新聞尚未抓取。"]
-    response = requests.get("https://stocknews.ai/api/news", headers={"x-api-key": api_key, **HEADERS}, params={"symbol": "SPY,NVDA,MSFT,AAPL,AMZN,GOOGL,META,TSLA", "limit": 30}, timeout=TIMEOUT)
+    response = requests.get(
+        "https://stocknews.ai/api/news",
+        headers={"x-api-key": api_key, **HEADERS},
+        params={"symbol": "SPY,NVDA,MSFT,AAPL,AMZN,GOOGL,META,TSLA", "limit": 30},
+        timeout=TIMEOUT,
+    )
     response.raise_for_status()
     payload = response.json()
     rows = payload.get("data", []) if isinstance(payload, dict) else []
@@ -149,21 +156,30 @@ def fetch_us_news():
     return results, []
 
 
-def main():
+def main(progress_callback=None):
     started = datetime.now(timezone.utc)
     total_saved, notes = 0, []
     try:
+        _progress(progress_callback, "1/5：開始抓取台股新聞來源…")
+        # Leave a visible running record so a stalled run is diagnosable.
+        save_job_run("fetch_news", "running", "匯入工作已開始；正在抓取台股資料。", started)
         tw_items, tw_errors = fetch_tw_news()
-        for item in tw_items:
+        _progress(progress_callback, f"2/5：台股來源抓取完成，共 {len(tw_items)} 筆；開始寫入資料庫…")
+        for index, item in enumerate(tw_items, start=1):
             save_news(item)
             total_saved += 1
+            if index == 1 or index % 25 == 0 or index == len(tw_items):
+                _progress(progress_callback, f"3/5：台股寫入進度 {index}/{len(tw_items)}")
         notes.append(f"台股匯入 {len(tw_items)} 筆")
         notes.extend(tw_errors)
+        _progress(progress_callback, "4/5：檢查美股新聞來源…")
         try:
             us_items, us_notes = fetch_us_news()
-            for item in us_items:
+            for index, item in enumerate(us_items, start=1):
                 save_news(item)
                 total_saved += 1
+                if index == 1 or index % 10 == 0 or index == len(us_items):
+                    _progress(progress_callback, f"4/5：美股寫入進度 {index}/{len(us_items)}")
             notes.append(f"美股匯入 {len(us_items)} 筆")
             notes.extend(us_notes)
         except Exception as exc:
@@ -171,13 +187,15 @@ def main():
         status = "success" if total_saved else "warning"
         message = f"本次處理 {total_saved} 筆。 " + "；".join(notes)
         save_job_run("fetch_news", status, message, started)
-        print(message)
+        _progress(progress_callback, f"5/5：完成。{message}")
+        return message
     except Exception as exc:
         message = f"新聞匯入失敗：{type(exc).__name__}: {str(exc)[:500]}"
         try:
             save_job_run("fetch_news", "failed", message, started)
-        finally:
-            raise RuntimeError(message) from exc
+        except Exception as log_exc:
+            print(f"[fetch_news] 寫入失敗紀錄也失敗：{type(log_exc).__name__}: {str(log_exc)[:200]}", flush=True)
+        raise RuntimeError(message) from exc
 
 
 if __name__ == "__main__":

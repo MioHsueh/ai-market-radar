@@ -1,0 +1,1 @@
+把 services/storage.py 與 pages/5_資料庫連線測試.py 覆蓋/新增到原專案。\nrequirements.txt 請將 psycopg[binary]>=3.2,<4.0 加入原有清單，不要刪掉其他套件。\nDATABASE_URL 放在 Streamlit Cloud → App settings → Secrets。\n推送 GitHub 後，在側邊頁面「資料庫連線測試」按按鈕；成功時會寫入 job_runs。\n此更新只完成資料庫讀寫，不會自動抓新聞；新聞 API 與 AI pipeline 仍待下一步開發。

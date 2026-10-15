@@ -125,7 +125,7 @@ def fetch_twse_endpoint(path, source_label, kind, today=None):
     for row in payload:
         if not isinstance(row, dict):
             continue
-           if kind == "news":
+        if kind == "news":
             print(
                 "[NEWS API KEYS]",
                 list(row.keys()),

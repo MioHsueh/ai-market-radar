@@ -162,8 +162,21 @@ def fetch_twse_endpoint(path, source_label, kind, today=None):
                 url = f"https://mops.twse.com.tw/mops/web/t05sr01_1?step=1&co_id={company}"
 
         # Strict filter before an item can enter the result set.
-        if not title or _parse_published_date(date_value) != today:
+        if not title:
+           continue
+
+        print(
+            "[DATE DEBUG]",
+            "source =", source_label,
+            "raw_date =", repr(date_value),
+            "parsed_date =", repr(_parse_published_date(date_value)),
+            "today =", repr(today),
+            flush=True,
+        )
+
+        if _parse_published_date(date_value) != today:
             continue
+            
         item = _normalise("TW", source_label, title, url, date_value, summary)
         if item and _is_today(item, today):
             results.append(item)

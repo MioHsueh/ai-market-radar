@@ -326,7 +326,8 @@ def fetch_all_rss(target_day):
 
 def main(progress_callback=None):
     started = datetime.now(timezone.utc)
-    target_day = datetime.now(TAIPEI_TZ).date() - timedelta(days=1)
+    today_taipei = datetime.now(TAIPEI_TZ).date()
+    target_day = today_taipei
     total_saved = 0
     notes = []
 

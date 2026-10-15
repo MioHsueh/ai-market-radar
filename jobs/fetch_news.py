@@ -20,23 +20,55 @@ HEADERS = {"User-Agent": "AI-Market-Radar/1.6 (market research dashboard; contac
 TAIPEI_TZ = ZoneInfo("Asia/Taipei")
 
 # RSS feeds are public feed endpoints. Some publishers may change feed URLs or limit access.
+
 RSS_FEEDS = [
+    # Yahoo 股市：最新新聞與台股動態
     {
-        "name": "Yahoo 股市",
+        "name": "Yahoo 股市－最新新聞",
+        "market": "TW",
+        "url": "https://tw.stock.yahoo.com/rss?category=news",
+    },
+    {
+        "name": "Yahoo 股市－台股動態",
         "market": "TW",
         "url": "https://tw.stock.yahoo.com/rss?category=tw-market",
     },
+
+    # 中央社：產經證券與科技
     {
         "name": "中央社財經",
         "market": "TW",
-        "url": "https://www.cna.com.tw/rss/aall.xml",
+        "url": "https://feeds.feedburner.com/rsscna/finance",
     },
+    {
+        "name": "中央社科技",
+        "market": "TW",
+        "url": "https://feeds.feedburner.com/rsscna/technology",
+    },
+
+    # CNBC：美國綜合、經濟、財經與科技
     {
         "name": "CNBC Top News",
         "market": "US",
         "url": "https://www.cnbc.com/id/100003114/device/rss/rss.html",
     },
+    {
+        "name": "CNBC Economy",
+        "market": "US",
+        "url": "https://www.cnbc.com/id/20910258/device/rss/rss.html",
+    },
+    {
+        "name": "CNBC Finance",
+        "market": "US",
+        "url": "https://www.cnbc.com/id/10000664/device/rss/rss.html",
+    },
+    {
+        "name": "CNBC Technology",
+        "market": "US",
+        "url": "https://www.cnbc.com/id/19854910/device/rss/rss.html",
+    },
 ]
+
 
 
 def _progress(callback, message):
@@ -280,7 +312,7 @@ def fetch_all_rss(target_day):
             notes.append(f'{feed["name"]} {len(items)} 筆')
             _progress(None, f'RSS：{feed["name"]}，目標日期符合 {len(items)} 筆')
         except Exception as exc:
-            note = f'{feed["name"]} RSS 失敗：{type(exc).__name__}: {str(exc)[:160]}'
+            note = (f'{feed["name"]} RSS 失敗：'f'{type(exc).__name__}: {str(exc)[:250]}')
             notes.append(note)
             _progress(None, note)
     unique = {item["source_id"]: item for item in collected}

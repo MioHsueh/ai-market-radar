@@ -1,9 +1,27 @@
 import streamlit as st
 from services.storage import load_latest_report, load_recent_news
-from services.news_display import render_news_card, market_label, format_datetime
+from services.news_display import render_news_card, format_datetime
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+TAIPEI_TZ = ZoneInfo("Asia/Taipei")
+
+def is_today_news(item):
+    value = item.get("published_at")
+    if not value:
+        return False
+    try:
+        if isinstance(value, datetime):
+            dt = value
+        else:
+            dt = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=TAIPEI_TZ)
+        return dt.astimezone(TAIPEI_TZ).date() == datetime.now(TAIPEI_TZ).date()
+    except (TypeError, ValueError, OverflowError):
+        return False
 
 st.set_page_config(page_title="AI Market Radar", page_icon="🌐", layout="wide")
-
 st.markdown("""
 <style>
 .block-container {max-width: 1400px; padding-top: 1.7rem; padding-bottom: 3rem;}
@@ -20,37 +38,38 @@ st.markdown("""
 <div class="hero">
   <div class="hero-kicker">Daily market intelligence</div>
   <h1>🌐 AI Market Radar</h1>
-  <p>美股 × 台股｜把重要市場資訊整理成容易閱讀的每日情報</p>
+  <p>美股 × 台股｜只呈現台灣時間今天發布的新聞</p>
 </div>
 """, unsafe_allow_html=True)
 
+today = datetime.now(TAIPEI_TZ).date()
 try:
     report = load_latest_report()
-    news = load_recent_news(limit=100)
+    all_news = [dict(x) for x in load_recent_news(limit=500)]
 except Exception as exc:
     st.error("目前無法讀取 Supabase 資料。請確認 Streamlit Secrets 的 DATABASE_URL 與資料庫連線。")
     st.caption(f"錯誤類型：{type(exc).__name__}")
     st.stop()
 
-news = [dict(x) for x in news]
+news = [x for x in all_news if is_today_news(x)]
 us_news = [x for x in news if str(x.get("market", "")).upper() == "US"]
 tw_news = [x for x in news if str(x.get("market", "")).upper() == "TW"]
 
 m1, m2, m3 = st.columns(3)
-m1.metric("近期新聞", f"{len(news):,}")
-m2.metric("🇺🇸 美股新聞", f"{len(us_news):,}")
-m3.metric("🇹🇼 台股新聞", f"{len(tw_news):,}")
+m1.metric("今日新聞", f"{len(news):,}")
+m2.metric("🇺🇸 今日美股新聞", f"{len(us_news):,}")
+m3.metric("🇹🇼 今日台股新聞", f"{len(tw_news):,}")
 
-if report:
-    st.subheader("📌 每日市場總覽")
+if report and str(report.get("report_date", "")) == today.isoformat():
+    st.subheader("📌 今日市場總覽")
     st.caption(f"報告日期：{report.get('report_date', '未提供')} · 更新時間：{format_datetime(report.get('updated_at'))}")
     st.markdown(report.get("market_summary") or "目前尚無市場摘要。")
 else:
-    st.info("每日市場報告尚未產生。現在先顯示已匯入的真實新聞；後續接上分析流程後，這裡會呈現每日總覽。")
+    st.info("今天的市場報告尚未產生。")
 
 st.divider()
-st.subheader("📰 近期市場新聞")
-st.markdown('<div class="section-note">摘要目前是來源內容的精簡摘錄，並非 AI 生成；請點選原文核對完整資訊。</div>', unsafe_allow_html=True)
+st.subheader("📰 今日市場新聞")
+st.markdown('<div class="section-note">只顯示台灣時間今天發布的新聞；請點選原文核對完整資訊。</div>', unsafe_allow_html=True)
 
 f1, f2, f3 = st.columns([1, 1, 2])
 with f1:
@@ -69,13 +88,13 @@ if search_text.strip():
     q = search_text.strip().casefold()
     filtered = [x for x in filtered if q in str(x.get("title") or "").casefold() or q in str(x.get("summary") or "").casefold()]
 
-st.caption(f"目前顯示 {min(len(filtered), max_items)} / {len(filtered)} 筆符合條件的新聞")
+st.caption(f"目前顯示 {min(len(filtered), max_items)} / {len(filtered)} 筆今日新聞")
 if not filtered:
-    st.info("沒有符合條件的新聞。可以清除搜尋字詞，或切換市場篩選。")
+    st.info("今天尚無符合條件的新聞。")
 else:
     for item in filtered[:max_items]:
         render_news_card(st, item, compact=True)
 
 with st.expander("資料來源與閱讀說明"):
-    st.write("台股資料包含交易所新聞與上市公司重大訊息。部分舊資料的標題欄位曾被日期誤用，首頁會以中性公告標題呈現；修正匯入程式後的新資料會優先使用公告主旨。")
-    st.write("新聞內容及時間以原始來源為準。本網站提供資訊整理與研究輔助，不構成投資建議。")
+    st.write("新聞以原始來源的發布時間為準；首頁只顯示台灣時間今天發布的新聞。")
+    st.write("本網站提供資訊整理與研究輔助，不構成投資建議。")

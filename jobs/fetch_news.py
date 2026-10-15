@@ -1,16 +1,27 @@
-"""Fetch real Taiwan exchange news and optional US stock news into Supabase."""
+"""Fetch Taiwan exchange news with correct subject parsing, plus optional US news."""
 import hashlib
 import os
 import re
 from datetime import datetime, timezone
+
 import requests
 import streamlit as st
 
 from services.storage import save_news, save_job_run
 
 TWSE_BASE = "https://openapi.twse.com.tw/v1"
-TIMEOUT = (5, 20)
-HEADERS = {"User-Agent": "AI-Market-Radar/1.1 (market research dashboard)"}
+TIMEOUT = (5, 25)
+HEADERS = {"User-Agent": "AI-Market-Radar/1.2 (market research dashboard)"}
+
+
+def _field(row, *keywords):
+    """Find fields despite trailing spaces or slight label variations."""
+    for key, value in row.items():
+        normalized = re.sub(r"\s+", "", str(key)).casefold()
+        if all(re.sub(r"\s+", "", word).casefold() in normalized for word in keywords):
+            if value not in (None, ""):
+                return str(value).strip()
+    return ""
 
 
 def _pick(row, keys):
@@ -23,16 +34,11 @@ def _pick(row, keys):
 
 def _normalise_date(value):
     value = (value or "").strip()
-    if not value:
-        return ""
-    # TWSE data may use ROC date notation, e.g. 1151014.
-    m = re.fullmatch(r"(\d{2,3})(\d{2})(\d{2})", value)
-    if m:
-        year = int(m.group(1)) + 1911
-        return f"{year:04d}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
-    m = re.fullmatch(r"(\d{4})/(\d{1,2})/(\d{1,2})", value)
-    if m:
-        return f"{int(m.group(1)):04d}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+    digits = re.sub(r"\D", "", value)
+    if len(digits) == 7:  # ROC yyyMMdd
+        return f"{int(digits[:3]) + 1911:04d}-{int(digits[3:5]):02d}-{int(digits[5:]):02d}"
+    if len(digits) == 8 and ("/" in value or "-" in value or value.isdigit()):
+        return f"{digits[:4]}-{digits[4:6]}-{digits[6:8]}"
     return value
 
 
@@ -73,20 +79,25 @@ def fetch_twse_endpoint(path, source_label, kind):
             url = _pick(row, ["url", "URL", "link", "連結", "網址"])
             summary = _pick(row, ["content", "summary", "內容", "摘要"])
         else:
-            company = _pick(row, ["公司代號", "公司代碼", "Code"])
-            company_name = _pick(row, ["公司名稱", "公司簡稱", "CompanyName"])
-            # Important: choose the announcement subject before the event date.
-            title = _pick(row, ["主旨", "重大訊息主旨", "Subject", "title", "事實發生日"])
-            date_value = _pick(row, ["發言日期", "公告日期", "日期", "Date", "事實發生日"])
-            url = _pick(row, ["網址", "url", "URL", "連結"])
-            summary = _pick(row, ["說明", "內容", "摘要", "Description"])
-            if company and title:
-                prefix = f"[{company}]"
-                if not title.startswith(prefix):
-                    title = f"{prefix} {title}"
-                if company_name and company_name not in title:
-                    # Company name is retained in the summary to avoid excessively long titles.
-                    summary = f"公司：{company_name}。{summary}" if summary else f"公司：{company_name}。"
+            company = _field(row, "公司代號")
+            company_name = _field(row, "公司名稱") or _field(row, "公司簡稱")
+            # The official API's key can be '主旨 ' with a trailing space.
+            subject = _field(row, "主旨") or _field(row, "重大訊息主旨") or _field(row, "Subject")
+            if not subject:
+                # Never use 事實發生日 as the headline; skip if no real subject.
+                continue
+            title = f"{company_name}（{company}）：{subject}" if company_name and company else (f"{company}：{subject}" if company else subject)
+            date_value = _field(row, "發言日期") or _field(row, "出表日期") or _field(row, "公告日期")
+            time_value = _field(row, "發言時間")
+            # If the API supplies HHMMSS as digits, append a normalized clock time.
+            time_digits = re.sub(r"\D", "", time_value)
+            if date_value and len(time_digits) in (5, 6):
+                time_digits = time_digits.zfill(6)
+                date_value = f"{_normalise_date(date_value)}T{time_digits[:2]}:{time_digits[2:4]}:{time_digits[4:6]}"
+            url = _field(row, "網址") or _field(row, "url") or _field(row, "連結")
+            summary = _field(row, "說明") or _field(row, "內容") or _field(row, "摘要")
+            if not url and company:
+                url = f"https://mops.twse.com.tw/mops/web/t05sr01_1?step=1&co_id={company}"
         item = _normalise("TW", source_label, title, url, date_value, summary)
         if item:
             results.append(item)
@@ -119,12 +130,7 @@ def fetch_us_news():
             api_key = ""
     if not api_key:
         return [], ["未設定 STOCKNEWS_API_KEY；美股新聞尚未抓取。"]
-    response = requests.get(
-        "https://stocknews.ai/api/news",
-        headers={"x-api-key": api_key, **HEADERS},
-        params={"symbol": "SPY,NVDA,MSFT,AAPL,AMZN,GOOGL,META,TSLA", "limit": 30},
-        timeout=TIMEOUT,
-    )
+    response = requests.get("https://stocknews.ai/api/news", headers={"x-api-key": api_key, **HEADERS}, params={"symbol": "SPY,NVDA,MSFT,AAPL,AMZN,GOOGL,META,TSLA", "limit": 30}, timeout=TIMEOUT)
     response.raise_for_status()
     payload = response.json()
     rows = payload.get("data", []) if isinstance(payload, dict) else []
@@ -135,10 +141,8 @@ def fetch_us_news():
         url = _pick(row, ["url"])
         published = _pick(row, ["publishedAt", "firstSeenAt", "createdAt"])
         summary = _pick(row, ["stockImpactReasoning", "sentimentReasoning"])
-        if not summary:
-            bullets = row.get("trimSummarys")
-            if isinstance(bullets, list):
-                summary = "；".join(str(x) for x in bullets[:5])
+        if not summary and isinstance(row.get("trimSummarys"), list):
+            summary = "；".join(str(x) for x in row["trimSummarys"][:5])
         item = _normalise("US", source, title, url, published, summary)
         if item:
             results.append(item)
@@ -147,8 +151,7 @@ def fetch_us_news():
 
 def main():
     started = datetime.now(timezone.utc)
-    total_saved = 0
-    notes = []
+    total_saved, notes = 0, []
     try:
         tw_items, tw_errors = fetch_tw_news()
         for item in tw_items:
@@ -165,8 +168,8 @@ def main():
             notes.extend(us_notes)
         except Exception as exc:
             notes.append(f"美股來源錯誤：{type(exc).__name__}: {str(exc)[:180]}")
-        status = "success" if total_saved > 0 else "warning"
-        message = f"本次新增/更新處理 {total_saved} 筆。 " + "；".join(notes)
+        status = "success" if total_saved else "warning"
+        message = f"本次處理 {total_saved} 筆。 " + "；".join(notes)
         save_job_run("fetch_news", status, message, started)
         print(message)
     except Exception as exc:

@@ -287,42 +287,6 @@ def fetch_all_rss(target_day):
     return list(unique.values()), notes
 
 
-def fetch_us_news_api(target_day):
-    api_key = os.getenv("STOCKNEWS_API_KEY", "").strip()
-    if not api_key:
-        try:
-            api_key = str(st.secrets.get("STOCKNEWS_API_KEY", "")).strip()
-        except Exception:
-            api_key = ""
-    if not api_key:
-        return [], ["未設定 STOCKNEWS_API_KEY；美股 API 新聞未抓取。"]
-
-    response = requests.get(
-        "https://stocknews.ai/api/news",
-        headers={"x-api-key": api_key, **HEADERS},
-        params={"symbol": "SPY,NVDA,MSFT,AAPL,AMZN,GOOGL,META,TSLA", "limit": 100},
-        timeout=TIMEOUT,
-    )
-    response.raise_for_status()
-    payload = response.json()
-    rows = payload.get("data", []) if isinstance(payload, dict) else []
-    results = []
-
-    for row in rows:
-        title = _pick(row, ["signalTitle", "title"])
-        source = _pick(row, ["source"]) or "StockNews.AI"
-        url = _pick(row, ["url"])
-        published = _pick(row, ["publishedAt", "firstSeenAt", "createdAt"])
-        if _parse_published_date(published) != target_day:
-            continue
-        summary = _pick(row, ["stockImpactReasoning", "sentimentReasoning"])
-        if not summary and isinstance(row.get("trimSummarys"), list):
-            summary = "；".join(str(x) for x in row["trimSummarys"][:5])
-        item = _normalise("US", source, title, url, published, summary)
-        if item and _is_target_day(item, target_day):
-            results.append(item)
-    return results, []
-
 
 def main(progress_callback=None):
     started = datetime.now(timezone.utc)
@@ -354,7 +318,7 @@ def main(progress_callback=None):
                 _progress(progress_callback, f"3/5：官方台股寫入進度 {index}/{len(tw_items)}")
         notes.append(f"官方台股新聞 {tw_saved} 筆")
 
-        _progress(progress_callback, "4/5：開始抓取新聞 RSS 與美股 API…")
+        _progress(progress_callback, "4/5：開始抓取一般新聞 RSS…")
         rss_items, rss_notes = fetch_all_rss(target_day)
         notes.extend(rss_notes)
 
@@ -367,19 +331,6 @@ def main(progress_callback=None):
             rss_saved += 1
             total_saved += 1
         notes.append(f"RSS 新聞 {rss_saved} 筆")
-
-        try:
-            us_items, us_notes = fetch_us_news_api(target_day)
-            us_saved = 0
-            for item in us_items:
-                if _is_target_day(item, target_day):
-                    save_news(item)
-                    us_saved += 1
-                    total_saved += 1
-            notes.append(f"美股 API 新聞 {us_saved} 筆")
-            notes.extend(us_notes)
-        except Exception as exc:
-            notes.append(f"美股 API 失敗：{type(exc).__name__}: {str(exc)[:160]}")
 
         status = "success" if total_saved else "warning"
         message = (

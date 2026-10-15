@@ -1,9 +1,12 @@
-"""Fetch public RSS market news published today in Asia/Taipei."""
+"""Fetch today market news from public RSS feeds with cross-source deduplication."""
 import hashlib
+import os
 import re
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from collections import Counter
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
+from time import mktime
 from zoneinfo import ZoneInfo
 import xml.etree.ElementTree as ET
 
@@ -13,7 +16,7 @@ import streamlit as st
 from services.storage import save_news, save_job_run
 
 TIMEOUT = (5, 25)
-HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; AI-Market-Radar/1.0; RSS reader)"}
+HEADERS = {"User-Agent": "AI-Market-Radar/1.6 (market research dashboard; contact: admin@example.com)"}
 TAIPEI_TZ = ZoneInfo("Asia/Taipei")
 
 # RSS feeds are public feed endpoints. Some publishers may change feed URLs or limit access.
@@ -159,8 +162,42 @@ def _is_target_day(item, target_day):
     return _parse_published_date(item.get("published_at")) == target_day
 
 
+def _canonical_url(url):
+    """Normalize URLs so tracking parameters do not create duplicate articles."""
+    if not url:
+        return ""
+    try:
+        parts = urlsplit(url.strip())
+        if not parts.scheme or not parts.netloc:
+            return url.strip().rstrip("/")
+        tracking_prefixes = ("utm_",)
+        tracking_keys = {"fbclid", "gclid", "mc_cid", "mc_eid", "ref", "source"}
+        query = [
+            (key, value)
+            for key, value in parse_qsl(parts.query, keep_blank_values=True)
+            if key.casefold() not in tracking_keys
+            and not key.casefold().startswith(tracking_prefixes)
+        ]
+        path = parts.path.rstrip("/") or "/"
+        return urlunsplit((parts.scheme.casefold(), parts.netloc.casefold(), path, urlencode(query), ""))
+    except (TypeError, ValueError):
+        return str(url).strip().rstrip("/")
+
+
+def _normalised_title(title):
+    """Normalize punctuation and whitespace for cross-feed title matching."""
+    return re.sub(r"[\W_]+", "", (title or "").casefold(), flags=re.UNICODE)
+
+
 def _stable_id(market, source, title, url, published_at):
-    raw = "|".join([market, source or "", title or "", url or "", published_at or ""])
+    # Deliberately excludes RSS source name: one article syndicated by multiple
+    # feeds should keep the same database source_id.
+    published_day = _parse_published_date(published_at)
+    raw = "|".join([
+        (market or "").upper(),
+        _normalised_title(title),
+        published_day.isoformat() if published_day else (published_at or ""),
+    ])
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
@@ -313,11 +350,53 @@ def fetch_all_rss(target_day):
             notes.append(note)
             _progress(None, note)
 
-    unique = {
-        item["source_id"]: item
-        for item in collected
-    }
-    return list(unique.values()), notes
+    # Cross-source deduplication: first match by canonical URL, then by
+    # normalized title + Taiwan-local publication date. Keep the most useful
+    # copy (prefer a longer summary and a usable article URL).
+    unique = {}
+    duplicate_count = 0
+    for item in collected:
+        published_day = _parse_published_date(item.get("published_at"))
+        title_key = _normalised_title(item.get("title"))
+        url_key = _canonical_url(item.get("url"))
+        if url_key:
+            dedup_key = (item.get("market", "").upper(), "url", url_key)
+        else:
+            dedup_key = (item.get("market", "").upper(), "title-day", title_key,
+                         published_day.isoformat() if published_day else "")
+
+        # Even when URLs differ across syndication feeds, exact normalized
+        # title and publication day are a strong secondary duplicate signal.
+        title_day_key = (item.get("market", "").upper(), "title-day", title_key,
+                         published_day.isoformat() if published_day else "")
+        existing_key = next((key for key, value in unique.items()
+                             if key == dedup_key or key == title_day_key
+                             or (value.get("_title_day_key") == title_day_key)), None)
+        if existing_key is None:
+            item["_title_day_key"] = title_day_key
+            unique[dedup_key] = item
+            continue
+
+        duplicate_count += 1
+        existing = unique[existing_key]
+        # Keep the source record with more useful content, without duplicating it.
+        if len(item.get("summary") or "") > len(existing.get("summary") or ""):
+            existing["summary"] = item.get("summary")
+        if not existing.get("url") and item.get("url"):
+            existing["url"] = item["url"]
+
+    deduplicated = []
+    for item in unique.values():
+        item.pop("_title_day_key", None)
+        # Recompute the source ID from normalized title + date, independent of feed.
+        item["source_id"] = _stable_id(
+            item.get("market"), item.get("source"), item.get("title"),
+            item.get("url"), item.get("published_at")
+        )
+        deduplicated.append(item)
+
+    notes.append(f"跨來源去重：移除 {duplicate_count} 筆重複新聞；保留 {len(deduplicated)} 筆")
+    return deduplicated, notes
 
 
 

@@ -42,9 +42,91 @@ def _fetch_all(sql, params=()):
     with _connection() as conn:
         return conn.execute(sql, params).fetchall()
 
+def _canonical_news_url(url):
+    """Remove common tracking parameters so syndicated URLs match."""
+    from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
+    if not url:
+        return ""
+    try:
+        parts = urlsplit(str(url).strip())
+        ignored = {"fbclid", "gclid", "mc_cid", "mc_eid", "ref", "source"}
+        query = [
+            (k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True)
+            if not k.casefold().startswith("utm_") and k.casefold() not in ignored
+        ]
+        path = parts.path.rstrip("/") or "/"
+        return urlunsplit((parts.scheme.casefold(), parts.netloc.casefold(), path, urlencode(query), ""))
+    except (TypeError, ValueError):
+        return str(url).strip().rstrip("/")
+
+
+def _normalized_news_title(title):
+    import re
+    return re.sub(r"[\\W_]+", "", str(title or "").casefold(), flags=re.UNICODE)
+
+
+def _news_day_taipei(value):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    if not value:
+        return ""
+    try:
+        dt = value if isinstance(value, datetime) else datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=ZoneInfo("Asia/Taipei"))
+        return dt.astimezone(ZoneInfo("Asia/Taipei")).date().isoformat()
+    except (TypeError, ValueError, OverflowError):
+        return str(value)[:10]
+
+
+def _deduplicate_news_rows(rows):
+    """Deduplicate display rows across feeds, retaining the richest record."""
+    kept = []
+    seen_url = {}
+    seen_title_day = {}
+    for row in rows:
+        item = dict(row)
+        market = str(item.get("market") or "").upper()
+        day = _news_day_taipei(item.get("published_at"))
+        url_key = _canonical_news_url(item.get("url"))
+        title_key = _normalized_news_title(item.get("title"))
+        key_url = (market, url_key) if url_key else None
+        key_title = (market, title_key, day) if title_key and day else None
+        existing_index = None
+        if key_url and key_url in seen_url:
+            existing_index = seen_url[key_url]
+        elif key_title and key_title in seen_title_day:
+            existing_index = seen_title_day[key_title]
+        if existing_index is None:
+            idx = len(kept)
+            kept.append(item)
+            if key_url:
+                seen_url[key_url] = idx
+            if key_title:
+                seen_title_day[key_title] = idx
+            continue
+        existing = kept[existing_index]
+        if len(item.get("summary") or "") > len(existing.get("summary") or ""):
+            existing["summary"] = item.get("summary")
+        if not existing.get("url") and item.get("url"):
+            existing["url"] = item["url"]
+        # Keep source names visible as a combined provenance label.
+        sources = [x.strip() for x in str(existing.get("source") or "").split(" / ") if x.strip()]
+        incoming_source = str(item.get("source") or "").strip()
+        if incoming_source and incoming_source not in sources:
+            sources.append(incoming_source)
+            existing["source"] = " / ".join(sources)
+    return kept
+
+
 def load_recent_news(limit=20):
-    return _fetch_all("""select market,title,summary,source,url,published_at,fetched_at
-        from public.news order by published_at desc nulls last,fetched_at desc limit %s""", (int(limit),))
+    # Fetch a wider pool first, then deduplicate so duplicate rows do not occupy
+    # the homepage/page limit and older unique stories are still visible.
+    rows = _fetch_all("""select market,title,summary,source,url,published_at,fetched_at
+        from public.news
+        order by published_at desc nulls last,fetched_at desc
+        limit %s""", (max(int(limit) * 10, 500),))
+    return _deduplicate_news_rows(rows)[:int(limit)]
 
 def load_latest_report():
     rows = load_report_history(1)
@@ -62,14 +144,78 @@ def load_recent_analyses(limit=30):
         from public.analyses order by created_at desc limit %s""", (int(limit),))
 
 def save_news(item):
+    """Upsert by stable source_id, but also match existing stories across feeds."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    market = str(item["market"]).upper()
+    title = str(item.get("title") or "").strip()
+    source_id = item.get("source_id")
+    published_at = item.get("published_at")
+    item_day = _news_day_taipei(published_at)
+    item_url = _canonical_news_url(item.get("url"))
+    item_title_key = _normalized_news_title(title)
+
     with _connection() as conn:
+        # First, check exact URL matches and same normalized title on Taiwan-local
+        # publication day. This catches duplicates whose source_id differs.
+        candidates = conn.execute("""select id,source_id,market,title,summary,source,url,published_at
+            from public.news
+            where upper(market) = %s
+              and (published_at at time zone 'Asia/Taipei')::date = %s::date
+            order by fetched_at desc
+            limit 1000""", (market, item_day)).fetchall() if item_day else []
+
+        duplicates = []
+        for candidate in candidates:
+            row_url = _canonical_news_url(candidate.get("url"))
+            row_title_key = _normalized_news_title(candidate.get("title"))
+            if (item_url and row_url and item_url == row_url) or (
+                item_title_key and row_title_key == item_title_key
+            ):
+                duplicates.append(candidate)
+
+        if duplicates:
+            # Reuse the oldest matching row and delete extra duplicate rows for
+            # this same story/day. This also cleans up duplicates from earlier runs.
+            duplicate = sorted(duplicates, key=lambda r: r["id"])[0]
+            summaries = [str(r.get("summary") or "") for r in duplicates]
+            summaries.append(str(item.get("summary") or ""))
+            best_summary = max(summaries, key=len) or None
+            urls = [r.get("url") for r in duplicates if r.get("url")]
+            urls.append(item.get("url"))
+            best_url = next((u for u in urls if u), None)
+            sources = []
+            for candidate in duplicates:
+                for src in str(candidate.get("source") or "").split(" / "):
+                    src = src.strip()
+                    if src and src not in sources:
+                        sources.append(src)
+            incoming_source = str(item.get("source") or "").strip()
+            if incoming_source and incoming_source not in sources:
+                sources.append(incoming_source)
+            merged_source = " / ".join(sources) or incoming_source or "Unknown"
+            row = conn.execute("""update public.news set
+                    title=%s, summary=%s, source=%s, url=%s, published_at=%s
+                where id=%s returning id""",
+                (title or duplicate.get("title"), best_summary, merged_source,
+                 best_url, published_at or duplicate.get("published_at"),
+                 duplicate["id"])).fetchone()
+            extra_ids = [r["id"] for r in duplicates if r["id"] != duplicate["id"]]
+            if extra_ids:
+                conn.execute("delete from public.news where id = any(%s)", (extra_ids,))
+            return row["id"]
+
         row = conn.execute("""insert into public.news
             (source_id,market,title,summary,source,url,published_at)
             values (%s,%s,%s,%s,%s,%s,%s)
             on conflict (source_id) do update set market=excluded.market,title=excluded.title,
-            summary=excluded.summary,source=excluded.source,url=excluded.url,published_at=excluded.published_at
-            returning id""", (item.get("source_id"),item["market"],item["title"],item.get("summary"),
-            item.get("source"),item.get("url"),item.get("published_at"))).fetchone()
+            summary=case when length(coalesce(excluded.summary,'')) > length(coalesce(public.news.summary,''))
+                         then excluded.summary else public.news.summary end,
+            source=excluded.source,url=coalesce(excluded.url,public.news.url),
+            published_at=coalesce(excluded.published_at,public.news.published_at)
+            returning id""", (source_id,market,title,item.get("summary"),
+            item.get("source"),item.get("url"),published_at)).fetchone()
         return row["id"]
 
 def save_analysis(item):

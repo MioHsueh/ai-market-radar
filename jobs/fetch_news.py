@@ -1,11 +1,9 @@
-"""Fetch previous-day market news from TWSE and public RSS feeds."""
+"""Fetch public RSS market news published today in Asia/Taipei."""
 import hashlib
-import os
 import re
 from collections import Counter
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 from email.utils import parsedate_to_datetime
-from time import mktime
 from zoneinfo import ZoneInfo
 import xml.etree.ElementTree as ET
 
@@ -14,9 +12,8 @@ import streamlit as st
 
 from services.storage import save_news, save_job_run
 
-TWSE_BASE = "https://openapi.twse.com.tw/v1"
 TIMEOUT = (5, 25)
-HEADERS = {"User-Agent": "AI-Market-Radar/1.6 (market research dashboard; contact: admin@example.com)"}
+HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; AI-Market-Radar/1.0; RSS reader)"}
 TAIPEI_TZ = ZoneInfo("Asia/Taipei")
 
 # RSS feeds are public feed endpoints. Some publishers may change feed URLs or limit access.

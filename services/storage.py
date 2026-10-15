@@ -61,8 +61,9 @@ def _canonical_news_url(url):
 
 
 def _normalized_news_title(title):
+    """Normalize title by removing punctuation/whitespace for cross-feed matching."""
     import re
-    return re.sub(r"[\\W_]+", "", str(title or "").casefold(), flags=re.UNICODE)
+    return re.sub(r"[\W_]+", "", str(title or "").casefold(), flags=re.UNICODE)
 
 
 def _news_day_taipei(value):
@@ -170,9 +171,15 @@ def save_news(item):
         for candidate in candidates:
             row_url = _canonical_news_url(candidate.get("url"))
             row_title_key = _normalized_news_title(candidate.get("title"))
-            if (item_url and row_url and item_url == row_url) or (
-                item_title_key and row_title_key == item_title_key
-            ):
+            same_url = bool(item_url and row_url and item_url == row_url)
+            same_title_day = bool(
+                item_title_key
+                and row_title_key
+                and item_title_key == row_title_key
+                and item_day
+                and _news_day_taipei(candidate.get("published_at")) == item_day
+            )
+            if same_url or same_title_day:
                 duplicates.append(candidate)
 
         if duplicates:

@@ -1,10 +1,9 @@
-import os
 import streamlit as st
 from jobs.fetch_news import main as run_news_import
 
 st.set_page_config(page_title="新聞匯入測試｜AI Market Radar", layout="wide")
 st.title("📰 真實新聞匯入測試")
-st.write("從證交所官方 API 抓取台股新聞與上市公司重大訊息；若設定美股 API 金鑰，也會一併抓取美股新聞。")
+st.write("從證交所官方 API 抓取台股新聞與上市公司重大訊息，並從一般財經新聞 RSS 來源抓取新聞。")
 st.warning("請勿重複按下匯入。頁面會顯示執行階段；若長時間停在同一步，請記錄該步驟回報的內容。")
 
 if st.button("開始抓取並寫入 Supabase", type="primary"):

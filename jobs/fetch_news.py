@@ -298,18 +298,28 @@ def fetch_rss_feed(feed, target_day):
 
 
 def fetch_all_rss(target_day):
-    collected, notes = [], []
+    collected = []
+    notes = []
+
     for feed in RSS_FEEDS:
         try:
-            items = fetch_rss_feed(feed, target_day)
+            items, diagnostic = fetch_rss_feed(feed, target_day)
             collected.extend(items)
-            notes.append(f'{feed["name"]} {len(items)} 筆')
-            _progress(None, f'RSS：{feed["name"]}，目標日期符合 {len(items)} 筆')
+            notes.append(diagnostic)
+            _progress(None, diagnostic)
+
         except Exception as exc:
-            note = (f'{feed["name"]} RSS 失敗：'f'{type(exc).__name__}: {str(exc)[:250]}')
+            note = (
+                f'{feed["name"]} RSS 失敗：'
+                f'{type(exc).__name__}: {str(exc)[:250]}'
+            )
             notes.append(note)
             _progress(None, note)
-    unique = {item["source_id"]: item for item in collected}
+
+    unique = {
+        item["source_id"]: item
+        for item in collected
+    }
     return list(unique.values()), notes
 
 

@@ -125,7 +125,18 @@ def fetch_twse_endpoint(path, source_label, kind, today=None):
     for row in payload:
         if not isinstance(row, dict):
             continue
-
+           if kind == "news":
+            print(
+                "[NEWS API KEYS]",
+                list(row.keys()),
+                flush=True,
+            )
+            print(
+                "[NEWS API SAMPLE]",
+                {k: str(v)[:100] for k, v in row.items()},
+                flush=True,
+            )
+            break
         if kind == "news":
             title = _pick(row, ["title", "Title", "新聞標題", "標題", "主旨"])
             date_value = _pick(row, ["publishDate", "publish_date", "date", "發布日期", "日期", "發佈日期"])

@@ -7,15 +7,6 @@ st.title("📰 真實新聞匯入測試")
 st.write("從證交所官方 API 抓取台股新聞與上市公司重大訊息；若設定美股 API 金鑰，也會一併抓取美股新聞。")
 st.warning("請勿重複按下匯入。頁面會顯示執行階段；若長時間停在同一步，請記錄該步驟回報的內容。")
 
-key_exists = bool(os.getenv("STOCKNEWS_API_KEY"))
-if not key_exists:
-    try:
-        key_exists = bool(st.secrets.get("STOCKNEWS_API_KEY", ""))
-    except Exception:
-        key_exists = False
-if not key_exists:
-    st.info("尚未設定 STOCKNEWS_API_KEY：本次只會抓取台股官方資料。")
-
 if st.button("開始抓取並寫入 Supabase", type="primary"):
     status_box = st.status("準備開始匯入…", expanded=True)
     progress_text = st.empty()

@@ -225,18 +225,42 @@ def main(progress_callback=None):
     try:
         _progress(progress_callback, f"1/5：開始抓取 {today.isoformat()}（台灣時間）當日新聞…")
         save_job_run("fetch_news", "running", f"匯入工作已開始；只抓取 {today.isoformat()} 當日新聞。", started)
-        tw_items, tw_errors = fetch_tw_news()
-        _progress(progress_callback, f"2/5：台股當日新聞篩選完成，共 {len(tw_items)} 筆；開始寫入資料庫…")
-        for index, item in enumerate(tw_items, start=1):
-            # Final guard immediately before writing.
-            if not _is_today(item, today):
-                continue
-            save_news(item)
-            total_saved += 1
-            if index == 1 or index % 25 == 0 or index == len(tw_items):
-                _progress(progress_callback, f"3/5：台股寫入進度 {index}/{len(tw_items)}")
-        notes.append(f"台股當日新聞匯入 {total_saved} 筆")
-        notes.extend(tw_errors)
+
+tw_items, tw_errors = fetch_tw_news()
+
+from collections import Counter
+
+date_counts = Counter(
+    str(item.get("published_at") or "無日期")[:10]
+    for item in tw_items
+)
+
+_progress(
+    progress_callback,
+    f"診斷：今天={today.isoformat()}；"
+    f"篩選後={len(tw_items)}筆；"
+    f"日期分布={dict(date_counts)}"
+)
+
+tw_saved = 0
+
+for index, item in enumerate(tw_items, start=1):
+    if not _is_today(item, today):
+        continue
+
+    save_news(item)
+    total_saved += 1
+    tw_saved += 1
+
+    if index == 1 or index % 25 == 0 or index == len(tw_items):
+        _progress(
+            progress_callback,
+            f"3/5：台股寫入進度 {index}/{len(tw_items)}"
+        )
+
+notes.append(f"台股當日新聞處理 {tw_saved} 筆")
+notes.extend(tw_errors)
+
 
         _progress(progress_callback, "4/5：檢查美股當日新聞來源…")
         try:

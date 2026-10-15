@@ -1,12 +1,28 @@
 import streamlit as st
 from services.storage import load_recent_analyses
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 st.set_page_config(page_title="產業與個股分析｜AI Market Radar", layout="wide")
 st.title("🔎 產業與個股影響分析")
-st.caption("每個分析應區分已確認事實與 AI 推論，並保留原始新聞來源。")
-analyses = load_recent_analyses(50)
+st.caption("僅顯示台灣時間今天建立的分析；每個分析應區分已確認事實與 AI 推論，並保留原始新聞來源。")
+today = datetime.now(ZoneInfo("Asia/Taipei")).date()
+
+def is_today_analysis(item):
+    value = item.get("created_at")
+    if not value:
+        return False
+    try:
+        dt = value if isinstance(value, datetime) else datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=ZoneInfo("Asia/Taipei"))
+        return dt.astimezone(ZoneInfo("Asia/Taipei")).date() == today
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+analyses = [x for x in load_recent_analyses(100) if is_today_analysis(x)]
 if not analyses:
-    st.info("目前沒有分析紀錄。完成 AI API 設定與每日排程後，分析結果會顯示於此。")
+    st.info("今天尚無分析紀錄。")
 for item in analyses:
     with st.container(border=True):
         st.markdown(f"### {item.get('headline', '未命名分析')}")

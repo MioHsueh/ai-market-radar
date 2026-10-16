@@ -67,10 +67,6 @@ if report and str(report.get("report_date", "")) == today.isoformat():
 else:
     st.info("今天的市場報告尚未產生。")
 
-st.divider()
-st.subheader("📰 今日市場新聞")
-st.markdown('<div class="section-note">只顯示台灣時間今天發布的新聞；請點選原文核對完整資訊。</div>', unsafe_allow_html=True)
-
 f1, f2, f3 = st.columns([1, 1, 2])
 with f1:
     market_filter = st.selectbox("市場", ["全部市場", "台股", "美股"], index=0)

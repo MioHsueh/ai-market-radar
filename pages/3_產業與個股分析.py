@@ -8,7 +8,10 @@ import streamlit as st
 import plotly.express as px
 
 
-from services.storage import load_recent_news
+from services.storage import (
+    load_recent_news,
+    load_news_for_date_range,
+)
 
 TAIPEI_TZ = ZoneInfo("Asia/Taipei")
 NEWS_LIMIT = 500

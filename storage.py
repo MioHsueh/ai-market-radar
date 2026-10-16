@@ -60,17 +60,17 @@ def load_recent_news(limit=20):
     
 def load_news_for_date_range(start_date, end_date):
 """Load news published within a Taiwan-local date range, inclusive."""
-return _fetch_all(
-    """
-    SELECT market, title, summary, source, url, published_at, fetched_at
-    FROM public.news
-    WHERE published_at IS NOT NULL
-      AND (published_at AT TIME ZONE 'Asia/Taipei')::date
-          BETWEEN %s::date AND %s::date
-    ORDER BY published_at DESC, fetched_at DESC
-    """,
-    (start_date, end_date),
-)
+    return _fetch_all(
+        """
+        SELECT market, title, summary, source, url, published_at, fetched_at
+        FROM public.news
+        WHERE published_at IS NOT NULL
+          AND (published_at AT TIME ZONE 'Asia/Taipei')::date
+              BETWEEN %s::date AND %s::date
+        ORDER BY published_at DESC, fetched_at DESC
+        """,
+        (start_date, end_date),
+    )
 
 def load_latest_report():
     rows = load_report_history(1)

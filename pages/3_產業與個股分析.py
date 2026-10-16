@@ -3,6 +3,19 @@ from services.storage import load_recent_analyses
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+import streamlit as st
+from services.ai_analysis import generate_today_analyses
+
+if st.button("🤖 分析今天新聞", type="primary"):
+    with st.spinner("AI 正在分析今天的新聞，請稍候…"):
+        try:
+            result = generate_today_analyses(max_articles=10)
+            st.success(result["message"])
+            st.rerun()
+        except Exception as exc:
+            st.error("AI 分析失敗")
+            st.code(f"{type(exc).__name__}: {str(exc)[:1000]}")
+
 st.set_page_config(page_title="產業與個股分析｜AI Market Radar", layout="wide")
 st.title("🔎 產業與個股影響分析")
 st.caption("僅顯示台灣時間今天建立的分析；每個分析應區分已確認事實與 AI 推論，並保留原始新聞來源。")

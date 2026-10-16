@@ -262,6 +262,7 @@ try:
     us_count = sum(
         str(item.get("market") or "").upper() == "US" for item in news
     )
+
     linked_news_count = sum(
         bool(find_related_stocks(item)) for item in news
     )
@@ -270,7 +271,8 @@ try:
     col1.metric("分析新聞", f"{len(news):,}")
     col2.metric("台股新聞", f"{tw_count:,}")
     col3.metric("美股新聞", f"{us_count:,}")
-    col4.metric("辨識到公司", f"{linked_news_count:,}")
+    col4.metric("有公司關聯的新聞", f"{linked_news_count:,}")
+
 
     st.divider()
 

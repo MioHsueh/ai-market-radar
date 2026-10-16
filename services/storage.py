@@ -231,9 +231,6 @@ def save_news(item):
                 (title or duplicate.get("title"), best_summary, merged_source,
                  best_url, published_at or duplicate.get("published_at"),
                  duplicate["id"])).fetchone()
-            extra_ids = [r["id"] for r in duplicates if r["id"] != duplicate["id"]]
-            if extra_ids:
-                conn.execute("delete from public.news where id = any(%s)", (extra_ids,))
             return row["id"]
 
         row = conn.execute("""insert into public.news

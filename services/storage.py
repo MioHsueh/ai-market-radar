@@ -248,3 +248,19 @@ def save_job_run(job_name,status,message=None,started_at=None):
             values (%s,%s,%s,coalesce(%s,now()),now()) returning id""",
             (job_name,status,(message or "")[:2000],started_at)).fetchone()
         return row["id"]
+
+
+def load_news_for_date_range(start_date, end_date):
+    """Load news within a Taiwan-local date range, inclusive."""
+    return _fetch_all(
+        """
+        SELECT market, title, summary, source, url, published_at, fetched_at
+        FROM public.news
+        WHERE published_at IS NOT NULL
+          AND (published_at AT TIME ZONE 'Asia/Taipei')::date
+              BETWEEN %s::date AND %s::date
+        ORDER BY published_at DESC, fetched_at DESC
+        """,
+        (start_date, end_date),
+    )
+

@@ -244,23 +244,58 @@ def market_label(item):
 
 
 def deduplicate_news(items):
-    """Conservative dedupe by normalized URL, otherwise exact normalized title."""
-    unique = {}
-    for item in items:
-        url = str(item.get("url") or "").strip()
-        title = str(item.get("title") or "").strip()
-        if url.startswith(("https://", "http://")):
-            key = ("url", url.split("#", 1)[0].rstrip("/").casefold())
-        else:
-            normalized = re.sub(r"[\\W_]+", "", title.casefold(), flags=re.UNICODE)
-            if not normalized:
-                continue
-            key = ("title", normalized)
+    """Deduplicate by canonical URL first, then normalized exact title."""
+    def canonical_url(value):
+        value = str(value or "").strip()
+        if not value.startswith(("https://", "http://")):
+            return ""
+        try:
+            from urllib.parse import urlsplit, urlunsplit
+            parts = urlsplit(value)
+            # Remove common tracking parameters; ignore all query strings/fragments.
+            return urlunsplit((
+                parts.scheme.lower(),
+                parts.netloc.lower(),
+                parts.path.rstrip("/"),
+                "",
+                "",
+            ))
+        except ValueError:
+            return ""
 
-        old = unique.get(key)
-        if old is None or len(str(item.get("summary") or "")) > len(str(old.get("summary") or "")):
-            unique[key] = item
-    return list(unique.values())
+    def title_key(value):
+        return re.sub(r"[\\W_]+", "", str(value or "").casefold(), flags=re.UNICODE)
+
+    # Prefer the record with the most useful summary when duplicates collide.
+    unique = []
+    seen_urls = {}
+    seen_titles = {}
+
+    for item in items:
+        url_key = canonical_url(item.get("url"))
+        title = title_key(item.get("title"))
+        match_index = None
+
+        if url_key and url_key in seen_urls:
+            match_index = seen_urls[url_key]
+        elif title and title in seen_titles:
+            match_index = seen_titles[title]
+
+        if match_index is None:
+            match_index = len(unique)
+            unique.append(item)
+        else:
+            old_summary = str(unique[match_index].get("summary") or "")
+            new_summary = str(item.get("summary") or "")
+            if len(new_summary) > len(old_summary):
+                unique[match_index] = item
+
+        if url_key:
+            seen_urls[url_key] = match_index
+        if title:
+            seen_titles[title] = match_index
+
+    return unique
 
 
 st.set_page_config(
@@ -392,8 +427,14 @@ try:
     col1.metric("分析新聞", f"{len(news):,}")
     col2.metric("台股新聞", f"{tw_count:,}")
     col3.metric("美股新聞", f"{us_count:,}")
-    col4.metric("有公司關聯的新聞", f"{linked_news_count:,}")
-    col5.metric("不重複關聯公司", f"{unique_company_count:,}")
+    col4.metric("命中公司關鍵字的新聞", f"{linked_news_count:,}")
+    col5.metric("不重複公司（市場別）", f"{unique_company_count:,}")
+    st.caption(
+        "統計口徑：分析新聞先依相同網址或完全相同標題去重；"
+        "「命中公司關鍵字的新聞」是至少命中一家公司名稱的新聞篇數；"
+        "「不重複公司（市場別）」是去重後的市場＋公司配對數。"
+        "目前只讀取資料庫最新 500 筆新聞，因此資料量超過上限時仍可能少算。"
+    )
 
 
     st.divider()

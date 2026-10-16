@@ -305,8 +305,7 @@ try:
         )
         fig.update_traces(textposition="outside")
         st.plotly_chart(fig, use_container_width=True)
-
-        )
+        
         st.dataframe(
             industry_counts,
             use_container_width=True,

@@ -147,6 +147,20 @@ def sentiment_hint(item):
     return "中性／需人工確認", positive, negative
 
 
+def sentiment_evidence(item):
+    """Return the exact keyword hits used by the rule-based sentiment hint."""
+    text = combined_text(item)
+    positive_hits = [
+        keyword for keyword in POSITIVE_KEYWORDS
+        if keyword.casefold() in text
+    ]
+    negative_hits = [
+        keyword for keyword in NEGATIVE_KEYWORDS
+        if keyword.casefold() in text
+    ]
+    return positive_hits, negative_hits
+
+
 def market_label(item):
     market = str(item.get("market") or "").upper()
     if market == "TW":
@@ -254,6 +268,8 @@ try:
             "summary": str(item.get("summary") or ""),
             "positive_count": positive_count,
             "negative_count": negative_count,
+            "positive_evidence": sentiment_evidence(item)[0],
+            "negative_evidence": sentiment_evidence(item)[1],
         })
 
     tw_count = sum(
@@ -340,7 +356,65 @@ try:
 
     st.divider()
 
-    st.subheader("二、關聯個股新聞")
+    # This trend is always calculated from the last 7 Taipei calendar days,
+    # regardless of the page's current news-date filter.
+    st.subheader("二、最近 7 天產業熱度變化")
+    seven_day_start = today - pd.Timedelta(days=6)
+    seven_day_news = [
+        item for item in dated_news
+        if seven_day_start <= news_day(item) <= today
+    ]
+    heat_rows = []
+    for item in seven_day_news:
+        day = news_day(item)
+        for industry in classify_industries(item):
+            heat_rows.append({
+                "日期": day.isoformat(),
+                "產業主題": industry,
+                "新聞筆數": 1,
+            })
+
+    if heat_rows:
+        heat_df = pd.DataFrame(heat_rows)
+        heat_counts = (
+            heat_df.groupby(["日期", "產業主題"], as_index=False)
+            .size()
+            .rename(columns={"size": "新聞筆數"})
+        )
+        # Include dates with no articles in the x-axis by setting a stable date range.
+        date_axis = pd.date_range(
+            start=seven_day_start, end=pd.Timestamp(today), freq="D"
+        ).strftime("%Y-%m-%d").tolist()
+        heat_fig = px.line(
+            heat_counts,
+            x="日期",
+            y="新聞筆數",
+            color="產業主題",
+            markers=True,
+            category_orders={"日期": date_axis},
+            labels={"日期": "台灣日期", "新聞筆數": "新聞篇數", "產業主題": "產業主題"},
+        )
+        heat_fig.update_layout(
+            height=420,
+            xaxis=dict(categoryorder="array", categoryarray=date_axis),
+            margin=dict(l=20, r=20, t=30, b=20),
+            legend_title_text="產業主題",
+        )
+        st.plotly_chart(heat_fig, use_container_width=True)
+        st.caption(
+            f"統計區間：{seven_day_start:%Y-%m-%d} 至 {today:%Y-%m-%d}（台灣時間）。"
+            "資料以目前載入的最新新聞為準；新聞量代表關注度，不代表股價方向。"
+        )
+        heat_table = heat_counts.pivot(
+            index="產業主題", columns="日期", values="新聞筆數"
+        ).fillna(0).astype(int)
+        st.dataframe(heat_table, use_container_width=True)
+    else:
+        st.info("最近 7 天目前沒有可用的日期新聞資料。")
+
+    st.divider()
+
+    st.subheader("三、關聯個股新聞與公司摘要")
     if stock_rows:
         stock_df = pd.DataFrame(stock_rows)
         stock_counts = (
@@ -364,6 +438,30 @@ try:
             stock_df["公司／代號"] == chosen_stock
         ]
 
+        # Company-level roll-up: aggregate today's (or currently selected range's)
+        # matched articles, sentiment hints, and industry topics.
+        company_news = [
+            row for row in analyzed_rows
+            if chosen_stock in row["關聯公司"].split("、")
+        ]
+        if company_news:
+            positive_n = sum(row["初步判讀"] == "偏正面" for row in company_news)
+            negative_n = sum(row["初步判讀"] == "偏負面" for row in company_news)
+            neutral_n = len(company_news) - positive_n - negative_n
+            topic_counts = {}
+            for row in company_news:
+                for topic in row["產業主題"].split("、"):
+                    topic_counts[topic] = topic_counts.get(topic, 0) + 1
+            main_topics = sorted(topic_counts.items(), key=lambda x: x[1], reverse=True)[:3]
+            st.markdown(f"#### {chosen_stock}｜新聞彙整")
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("相關新聞", f"{len(company_news):,}")
+            m2.metric("偏正面", f"{positive_n:,}")
+            m3.metric("偏負面", f"{negative_n:,}")
+            m4.metric("中性／需確認", f"{neutral_n:,}")
+            st.write("主要涉及主題：" + ("、".join(f"{topic}（{count}）" for topic, count in main_topics) or "未分類"))
+            st.caption("以下列出命中公司關鍵字的原始新聞；摘要是規則式彙整，不是 AI 生成的投資結論。")
+
         for _, row in details.iterrows():
             with st.container(border=True):
                 st.markdown(f"**{row['新聞標題']}**")
@@ -382,7 +480,7 @@ try:
 
     st.divider()
 
-    st.subheader("三、新聞初步判讀")
+    st.subheader("四、利多／利空／中性初步判讀與依據")
     sentiment_counts = {}
     for row in analyzed_rows:
         sentiment_counts[row["初步判讀"]] = (
@@ -425,6 +523,12 @@ try:
                     f"正面關鍵字命中：{row['positive_count']}；"
                     f"負面關鍵字命中：{row['negative_count']}"
                 )
+                if row["positive_evidence"]:
+                    st.write("正面判讀依據：" + "、".join(row["positive_evidence"]))
+                if row["negative_evidence"]:
+                    st.write("負面判讀依據：" + "、".join(row["negative_evidence"]))
+                if not row["positive_evidence"] and not row["negative_evidence"]:
+                    st.write("判讀依據：未命中明確正負面關鍵字，因此列為中性／需人工確認。")
                 if row["summary"]:
                     st.write(row["summary"])
                 if row["原文連結"].startswith(("https://", "http://")):

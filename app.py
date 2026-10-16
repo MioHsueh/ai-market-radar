@@ -66,31 +66,3 @@ if report and str(report.get("report_date", "")) == today.isoformat():
     st.markdown(report.get("market_summary") or "目前尚無市場摘要。")
 else:
     st.info("今天的市場報告尚未產生。")
-
-f1, f2, f3 = st.columns([1, 1, 2])
-with f1:
-    market_filter = st.selectbox("市場", ["全部市場", "台股", "美股"], index=0)
-with f2:
-    max_items = st.selectbox("顯示筆數", [10, 20, 50], index=1)
-with f3:
-    search_text = st.text_input("搜尋標題或內容", placeholder="例如：半導體、董事會、AI")
-
-filtered = news
-if market_filter == "台股":
-    filtered = [x for x in filtered if str(x.get("market", "")).upper() == "TW"]
-elif market_filter == "美股":
-    filtered = [x for x in filtered if str(x.get("market", "")).upper() == "US"]
-if search_text.strip():
-    q = search_text.strip().casefold()
-    filtered = [x for x in filtered if q in str(x.get("title") or "").casefold() or q in str(x.get("summary") or "").casefold()]
-
-st.caption(f"目前顯示 {min(len(filtered), max_items)} / {len(filtered)} 筆今日新聞")
-if not filtered:
-    st.info("今天尚無符合條件的新聞。")
-else:
-    for item in filtered[:max_items]:
-        render_news_card(st, item, compact=True)
-
-with st.expander("資料來源與閱讀說明"):
-    st.write("新聞以原始來源的發布時間為準；首頁只顯示台灣時間今天發布的新聞。")
-    st.write("本網站提供資訊整理與研究輔助，不構成投資建議。")

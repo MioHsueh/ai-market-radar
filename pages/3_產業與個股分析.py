@@ -266,12 +266,22 @@ try:
     linked_news_count = sum(
         bool(find_related_stocks(item)) for item in news
     )
-
-    col1, col2, col3, col4 = st.columns(4)
+    
+    # 計算不重複的「市場＋公司」配對數
+    unique_companies = {
+        (market, company)
+        for item in news
+        for market, company in find_related_stocks(item)
+    }
+    
+    unique_company_count = len(unique_companies)
+    
+    col1, col2, col3, col4, col5 = st.columns(5)
     col1.metric("分析新聞", f"{len(news):,}")
     col2.metric("台股新聞", f"{tw_count:,}")
     col3.metric("美股新聞", f"{us_count:,}")
     col4.metric("有公司關聯的新聞", f"{linked_news_count:,}")
+    col5.metric("不重複關聯公司", f"{unique_company_count:,}")
 
 
     st.divider()

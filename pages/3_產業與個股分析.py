@@ -1,6 +1,7 @@
 
 """Rule-based industry and stock analysis without a paid AI API."""
 from datetime import datetime
+import re
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -204,6 +205,33 @@ def sentiment_evidence(item):
         if keyword.casefold() in text
     ]
     return positive_hits, negative_hits
+
+
+def company_impact_guidance(item):
+    """
+    Build a cautious, evidence-linked company impact note.
+    This is a rule-based follow-up checklist, not a claim of confirmed impact.
+    """
+    industries = classify_industries(item)
+    guides = []
+    for industry in industries:
+        guide = INDUSTRY_IMPACT_GUIDES.get(industry)
+        if guide:
+            guides.append((industry, guide))
+
+    if not guides:
+        return (
+            "尚無足夠的產業線索，需先核對原文與公司業務。",
+            "確認公司公告、營收、訂單及新聞所述事件是否直接涉及該公司。",
+        )
+
+    paths = "；".join(
+        f"{industry}：{guide['impact']}" for industry, guide in guides
+    )
+    watches = "；".join(
+        f"{industry}：{guide['watch']}" for industry, guide in guides
+    )
+    return paths, watches
 
 
 def market_label(item):
@@ -565,6 +593,21 @@ try:
             st.write("主要涉及主題：" + ("、".join(f"{topic}（{count}）" for topic, count in main_topics) or "未分類"))
             st.caption("以下列出命中公司關鍵字的原始新聞；摘要是規則式彙整，不是 AI 生成的投資結論。")
 
+            st.markdown("##### 個股影響證據摘要")
+            st.dataframe(
+                pd.DataFrame([
+                    {
+                        "新聞標題": row["新聞標題"],
+                        "市場": row["市場"],
+                        "初步方向": row["初步判讀"],
+                        "來源": row["來源"],
+                    }
+                    for row in company_news
+                ]),
+                use_container_width=True,
+                hide_index=True,
+            )
+
         for _, row in details.iterrows():
             with st.container(border=True):
                 st.markdown(f"**{row['新聞標題']}**")
@@ -587,8 +630,37 @@ try:
                 ]
                 if matching:
                     st.caption("公司關聯依據：" + "、".join(matching))
+                matched_item = next(
+                    (
+                        item for item in news
+                        if str(item.get("title") or "未提供標題") == row["新聞標題"]
+                    ),
+                    {},
+                )
+                impact_path, watch_items = company_impact_guidance(matched_item)
+                st.markdown("**可能的影響路徑（待驗證）**")
+                st.write(impact_path)
+                st.markdown("**後續建議查證**")
+                st.write(watch_items)
+                pos_hits, neg_hits = sentiment_evidence(matched_item)
+                if pos_hits or neg_hits:
+                    st.caption(
+                        "本則新聞命中的情緒字詞："
+                        + (
+                            "偏正面字詞：" + "、".join(pos_hits)
+                            if pos_hits else "未命中偏正面字詞"
+                        )
+                        + "；"
+                        + (
+                            "偏負面字詞：" + "、".join(neg_hits)
+                            if neg_hits else "未命中偏負面字詞"
+                        )
+                    )
+                else:
+                    st.caption("標題與摘要未命中明確正負面字詞，列為中性／需人工確認。")
                 st.caption(
-                    "影響方向僅依標題／摘要關鍵字初判；請以原始新聞、公司公告與財報確認。"
+                    "注意：新聞提及公司不代表公司一定受惠或受害；"
+                    "請以原文、公司公告及財報確認實際關聯。"
                 )
                 if row["原文連結"].startswith(("https://", "http://")):
                     st.markdown(f"[閱讀原文]({row['原文連結']})")

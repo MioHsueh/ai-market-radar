@@ -28,6 +28,24 @@ jobs:
           python -m pip install --upgrade pip
           pip install "streamlit>=1.40" "psycopg[binary]>=3.2,<4.0" requests
 
+      - name: Check database configuration
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          python - <<'PY'
+          import os
+          from urllib.parse import urlsplit
+
+          value = os.getenv("DATABASE_URL", "")
+          parsed = urlsplit(value)
+
+          print("DATABASE_URL exists:", bool(value))
+          print("PostgreSQL URL:", parsed.scheme in ("postgresql", "postgres"))
+          print("Hostname exists:", bool(parsed.hostname))
+          print("Database path exists:", bool(parsed.path and parsed.path != "/"))
+          print("Contains literal DATABASE_URL:", "DATABASE_URL" in value)
+          PY
+
       - name: Fetch news and build daily report
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}

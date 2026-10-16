@@ -5,6 +5,8 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 import streamlit as st
+import plotly.express as px
+
 
 from services.storage import load_recent_news
 
@@ -282,8 +284,28 @@ try:
             .rename("新聞筆數")
             .reset_index()
         )
-        st.bar_chart(
-            industry_counts.set_index("產業主題")["新聞筆數"]
+        
+        fig = px.bar(
+            industry_counts.sort_values("新聞筆數", ascending=True),
+            x="新聞筆數",
+            y="產業主題",
+            orientation="h",
+            text="新聞筆數",
+            labels={
+                "新聞筆數": "新聞筆數",
+                "產業主題": "產業主題",
+            },
+        )
+        fig.update_layout(
+            xaxis_title="新聞筆數",
+            yaxis_title="",
+            yaxis=dict(autorange="reversed"),
+            height=420,
+            margin=dict(l=20, r=20, t=20, b=20),
+        )
+        fig.update_traces(textposition="outside")
+        st.plotly_chart(fig, use_container_width=True)
+
         )
         st.dataframe(
             industry_counts,

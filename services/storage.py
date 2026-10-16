@@ -202,7 +202,7 @@ def save_news(item):
                 and item_day
                 and _news_day_taipei(candidate.get("published_at")) == item_day
             )
-            if same_url or same_title_day:
+            if same_url:
                 duplicates.append(candidate)
 
         if duplicates:

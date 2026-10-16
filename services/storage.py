@@ -158,14 +158,36 @@ def save_news(item):
     item_title_key = _normalized_news_title(title)
 
     with _connection() as conn:
-        # First, check exact URL matches and same normalized title on Taiwan-local
-        # publication day. This catches duplicates whose source_id differs.
-        candidates = conn.execute("""select id,source_id,market,title,summary,source,url,published_at
-            from public.news
-            where upper(market) = %s
-              and (published_at at time zone 'Asia/Taipei')::date = %s::date
-            order by fetched_at desc
-            limit 1000""", (market, item_day)).fetchall() if item_day else []
+        # URL matches are checked across ALL markets and dates, with no 1000-row
+        # limit. RSS feeds can publish different titles/timestamps for the same URL.
+        url_candidates = []
+        if item_url:
+            url_candidates = conn.execute(
+                """select id,source_id,market,title,summary,source,url,published_at
+                   from public.news
+                   where url is not null and btrim(url) <> ''
+                   order by fetched_at desc"""
+            ).fetchall()
+
+        # If there is no URL match, fall back to same market + Taiwan-local
+        # publication date + normalized title. No arbitrary candidate limit.
+        title_candidates = []
+        if item_title_key and item_day:
+            title_candidates = conn.execute(
+                """select id,source_id,market,title,summary,source,url,published_at
+                   from public.news
+                   where upper(market) = %s
+                     and published_at is not null
+                     and (published_at at time zone 'Asia/Taipei')::date = %s::date
+                   order by fetched_at desc""",
+                (market, item_day),
+            ).fetchall()
+
+        candidates_by_id = {
+            candidate["id"]: candidate
+            for candidate in [*url_candidates, *title_candidates]
+        }
+        candidates = list(candidates_by_id.values())
 
         duplicates = []
         for candidate in candidates:
@@ -176,6 +198,7 @@ def save_news(item):
                 item_title_key
                 and row_title_key
                 and item_title_key == row_title_key
+                and str(candidate.get("market") or "").upper() == market
                 and item_day
                 and _news_day_taipei(candidate.get("published_at")) == item_day
             )
@@ -248,19 +271,3 @@ def save_job_run(job_name,status,message=None,started_at=None):
             values (%s,%s,%s,coalesce(%s,now()),now()) returning id""",
             (job_name,status,(message or "")[:2000],started_at)).fetchone()
         return row["id"]
-
-
-def load_news_for_date_range(start_date, end_date):
-    """Load news within a Taiwan-local date range, inclusive."""
-    return _fetch_all(
-        """
-        SELECT market, title, summary, source, url, published_at, fetched_at
-        FROM public.news
-        WHERE published_at IS NOT NULL
-          AND (published_at AT TIME ZONE 'Asia/Taipei')::date
-              BETWEEN %s::date AND %s::date
-        ORDER BY published_at DESC, fetched_at DESC
-        """,
-        (start_date, end_date),
-    )
-

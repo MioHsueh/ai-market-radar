@@ -364,15 +364,12 @@ try:
     st.subheader("二、最近 7 天產業熱度變化")
     seven_day_start = today - pd.Timedelta(days=6)
     
-    # 重新載入較大量的資料，避免上方日期篩選影響最近 7 天統計
+    # 直接從資料庫查詢最近 7 天的新聞
     with st.spinner("正在載入最近 7 天的新聞資料…"):
-        trend_source_news = load_recent_news(limit=500)
-
-    seven_day_news = []
-    for item in trend_source_news:
-        day = news_day(item)
-        if day is not None and seven_day_start.date() <= day <= today:
-            seven_day_news.append(item)
+        seven_day_news = load_news_for_date_range(
+            seven_day_start.date(),
+            today,
+        )
             
     heat_rows = []
     for item in seven_day_news:

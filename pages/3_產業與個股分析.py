@@ -78,6 +78,48 @@ NEGATIVE_KEYWORDS = [
 ]
 
 
+# 產業影響路徑與後續觀察指標：屬於分析提示，不代表已證實的股價影響。
+INDUSTRY_IMPACT_GUIDES = {
+    "AI 與半導體": {
+        "impact": "需求、晶片供應、先進製程／封裝產能與資本支出可能影響供應鏈。",
+        "watch": "月營收、客戶訂單、產能利用率、資本支出、毛利率及法說會展望。",
+        "caution": "需確認新聞是否涉及實際訂單、出貨或公司公告；僅提到 AI 不足以判定受惠。",
+    },
+    "總體經濟與金融": {
+        "impact": "利率、通膨、匯率與就業數據可能改變資金成本、企業需求及市場評價。",
+        "watch": "官方經濟數據、央行聲明、債券殖利率、匯率及後續政策指引。",
+        "caution": "需確認數據相對市場預期的差異，不能只依數據升降判斷市場方向。",
+    },
+    "電動車與能源": {
+        "impact": "需求、電池成本、能源價格與政策可能影響車廠、零組件及能源供應鏈。",
+        "watch": "交車量、電池價格、訂單、原物料價格、補助政策及公司毛利率。",
+        "caution": "產業題材不等於單一公司營運改善，應確認公司實際產品與營收曝險。",
+    },
+    "企業與消費": {
+        "impact": "營收、訂單、消費需求與成本變化可能影響企業成長與獲利。",
+        "watch": "月營收、訂單能見度、存貨、毛利率、財報與公司展望。",
+        "caution": "需區分已公布的實際數字、公司預測與媒體推測。",
+    },
+    "政策與國際局勢": {
+        "impact": "關稅、出口管制與地緣政治可能改變供應鏈成本、出貨限制及市場風險。",
+        "watch": "政策正式公告、生效日期、豁免範圍、公司回應與供應鏈調整。",
+        "caution": "政策消息仍可能變動，應以正式公告及公司揭露確認影響範圍。",
+    },
+    "其他市場新聞": {
+        "impact": "目前無法從已設定的產業關鍵字推導明確影響路徑。",
+        "watch": "閱讀原始新聞，確認涉及的公司、事件、時間點與可驗證數據。",
+        "caution": "資料不足時不推定產業或股價方向。",
+    },
+}
+
+def industry_evidence(item, industry):
+    """Return keywords supporting an industry match."""
+    text = combined_text(item)
+    keywords = INDUSTRY_KEYWORDS.get(industry, [])
+    return [keyword for keyword in keywords if keyword.casefold() in text]
+
+
+
 def taipei_today():
     return datetime.now(TAIPEI_TZ).date()
 
@@ -173,6 +215,26 @@ def market_label(item):
     return market or "未分類"
 
 
+def deduplicate_news(items):
+    """Conservative dedupe by normalized URL, otherwise exact normalized title."""
+    unique = {}
+    for item in items:
+        url = str(item.get("url") or "").strip()
+        title = str(item.get("title") or "").strip()
+        if url.startswith(("https://", "http://")):
+            key = ("url", url.split("#", 1)[0].rstrip("/").casefold())
+        else:
+            normalized = re.sub(r"[\\W_]+", "", title.casefold(), flags=re.UNICODE)
+            if not normalized:
+                continue
+            key = ("title", normalized)
+
+        old = unique.get(key)
+        if old is None or len(str(item.get("summary") or "")) > len(str(old.get("summary") or "")):
+            unique[key] = item
+    return list(unique.values())
+
+
 st.set_page_config(
     page_title="產業與個股分析｜AI Market Radar",
     page_icon="📊",
@@ -211,6 +273,9 @@ try:
         ]
     else:
         news = all_news
+
+    # Remove exact duplicate URLs/titles before metrics and charts.
+    news = deduplicate_news(news)
 
     if not news:
         st.warning(
@@ -359,9 +424,40 @@ try:
 
     st.divider()
 
+    st.subheader("二、產業影響路徑與後續觀察")
+    st.caption(
+        "以下內容由新聞關鍵字對應到產業分析框架，屬於待驗證的觀察方向，"
+        "不是已確認的營運影響或股價預測。"
+    )
+
+    if industry_rows:
+        impact_industries = (
+            industry_df.groupby("產業主題")
+            .size()
+            .sort_values(ascending=False)
+            .index.tolist()
+        )
+        for industry in impact_industries:
+            guide = INDUSTRY_IMPACT_GUIDES.get(
+                industry, INDUSTRY_IMPACT_GUIDES["其他市場新聞"]
+            )
+            with st.expander(f"{industry}｜影響路徑與觀察指標", expanded=(industry == impact_industries[0])):
+                st.markdown(f"**可能的影響路徑**：{guide['impact']}")
+                st.markdown(f"**後續觀察指標**：{guide['watch']}")
+                st.markdown(f"**判讀限制**：{guide['caution']}")
+
+                evidence_rows = industry_df[industry_df["產業主題"] == industry]
+                st.write(f"目前關聯新聞：{len(evidence_rows)} 則")
+                for _, evidence_row in evidence_rows.head(3).iterrows():
+                    st.markdown(f"- **{evidence_row['新聞標題']}**（{evidence_row['市場']}｜{evidence_row['來源']}）")
+    else:
+        st.info("目前沒有足夠的產業新聞可供分析。")
+
+    st.divider()
+
     # This trend is always calculated from the last 7 Taipei calendar days,
     # regardless of the page's current news-date filter.
-    st.subheader("二、最近 7 天產業熱度變化")
+    st.subheader("三、最近 7 天產業熱度變化")
     seven_day_start = today - pd.Timedelta(days=6)
     
     # 直接從資料庫查詢最近 7 天的新聞
@@ -421,7 +517,7 @@ try:
 
     st.divider()
 
-    st.subheader("三、關聯個股新聞與公司摘要")
+    st.subheader("四、關聯個股新聞與公司摘要")
     if stock_rows:
         stock_df = pd.DataFrame(stock_rows)
         stock_counts = (
@@ -477,6 +573,23 @@ try:
                     f"來源：{row['來源']}"
                 )
                 st.write(f"初步判讀：{row['初步判讀']}")
+                matching = [
+                    keyword for keyword in STOCK_KEYWORDS.get(row["市場"], {}).get(chosen_stock, [])
+                    if keyword.casefold() in (
+                        row["新聞標題"] + " " + str(
+                            next(
+                                (item.get("summary") or "" for item in news
+                                 if str(item.get("title") or "未提供標題") == row["新聞標題"]),
+                                ""
+                            )
+                        )
+                    ).casefold()
+                ]
+                if matching:
+                    st.caption("公司關聯依據：" + "、".join(matching))
+                st.caption(
+                    "影響方向僅依標題／摘要關鍵字初判；請以原始新聞、公司公告與財報確認。"
+                )
                 if row["原文連結"].startswith(("https://", "http://")):
                     st.markdown(f"[閱讀原文]({row['原文連結']})")
     else:
@@ -487,7 +600,7 @@ try:
 
     st.divider()
 
-    st.subheader("四、利多／利空／中性初步判讀與依據")
+    st.subheader("五、利多／利空／中性初步判讀與依據")
     sentiment_counts = {}
     for row in analyzed_rows:
         sentiment_counts[row["初步判讀"]] = (

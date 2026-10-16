@@ -268,3 +268,23 @@ def save_job_run(job_name,status,message=None,started_at=None):
             values (%s,%s,%s,coalesce(%s,now()),now()) returning id""",
             (job_name,status,(message or "")[:2000],started_at)).fetchone()
         return row["id"]
+
+def load_news_for_date_range(start_date, end_date, limit=1000):
+    """Load news published within a Taiwan-local date range."""
+    with _connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, source_id, market, title, summary, source,
+                   url, published_at, fetched_at
+            FROM public.news
+            WHERE published_at IS NOT NULL
+              AND (published_at AT TIME ZONE 'Asia/Taipei')::date
+                  >= %s::date
+              AND (published_at AT TIME ZONE 'Asia/Taipei')::date
+                  <= %s::date
+            ORDER BY published_at DESC
+            LIMIT %s
+            """,
+            (start_date, end_date, limit),
+        ).fetchall()
+        return [dict(row) for row in rows]

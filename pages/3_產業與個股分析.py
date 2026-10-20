@@ -12,6 +12,7 @@ import plotly.express as px
 from services.storage import (
     load_recent_news,
     load_news_for_date_range,
+    load_recent_analyses,
 )
 
 TAIPEI_TZ = ZoneInfo("Asia/Taipei")
@@ -838,6 +839,110 @@ try:
                     st.write(row["summary"])
                 if row["原文連結"].startswith(("https://", "http://")):
                     st.markdown(f"[閱讀原文]({row['原文連結']})")
+
+    st.divider()
+
+    st.subheader("六、AI 個股影響分析與利多／利空判讀")
+    st.caption(
+        "此區顯示資料庫中由 AI 分析流程產生的結果；與上方依關鍵字計算的規則式判讀分開呈現。"
+        "AI 結果仍需核對原始新聞及公司公告，不代表股價必然朝該方向變動。"
+    )
+    try:
+        ai_analyses = load_recent_analyses(limit=100)
+    except Exception as ai_load_error:
+        ai_analyses = []
+        st.warning(
+            "目前無法讀取 AI 分析資料。若剛新增 sentiment 等資料欄位，"
+            "請先在 Supabase SQL Editor 執行 analyses_migration.sql，再重新載入。"
+        )
+        st.caption(f"資料庫訊息：{str(ai_load_error)[:300]}")
+
+    if ai_analyses:
+        sentiment_options = ["全部", "利多", "利空", "中性", "資訊不足"]
+        ai_filter = st.selectbox(
+            "AI 判讀方向", sentiment_options, key="ai_sentiment_filter"
+        )
+        if ai_filter != "全部":
+            ai_analyses = [
+                row for row in ai_analyses
+                if str(row.get("sentiment") or "資訊不足") == ai_filter
+            ]
+
+        st.caption(f"目前顯示 {len(ai_analyses)} 筆 AI 分析（最多讀取最新 100 筆）。")
+        for ai_row in ai_analyses:
+            sentiment = str(ai_row.get("sentiment") or "資訊不足")
+            headline = str(ai_row.get("headline") or "未提供標題")
+            confidence = str(ai_row.get("sentiment_confidence") or "未標示")
+            with st.container(border=True):
+                st.markdown(f"**{headline}**")
+                st.caption(
+                    f"產業：{ai_row.get('industry') or '未分類'}｜"
+                    f"判讀：{sentiment}｜信心程度：{confidence}"
+                )
+                if ai_row.get("summary"):
+                    st.write("**新聞摘要**")
+                    st.write(ai_row["summary"])
+                if ai_row.get("sentiment_reason"):
+                    st.write("**方向判斷原因**")
+                    st.write(ai_row["sentiment_reason"])
+                if ai_row.get("sentiment_evidence"):
+                    st.write("**判斷依據**")
+                    st.write(ai_row["sentiment_evidence"])
+                if ai_row.get("industry_impact"):
+                    st.write("**可能的產業／股價影響**")
+                    st.write(ai_row["industry_impact"])
+
+                related = ai_row.get("related_stocks") or []
+                if isinstance(related, str):
+                    try:
+                        import json
+                        related = json.loads(related)
+                    except (ValueError, TypeError):
+                        related = []
+                if related:
+                    st.write("**關聯個股與影響原因**")
+                    if isinstance(related, list):
+                        for stock in related:
+                            if isinstance(stock, dict):
+                                name = stock.get("name") or stock.get("stock") or stock.get("company") or "未命名公司"
+                                direction = stock.get("impact_direction") or stock.get("direction") or "未判定"
+                                relation = stock.get("relation_type") or ""
+                                reason = stock.get("reason") or stock.get("impact_reason") or ""
+                                evidence = stock.get("evidence") or ""
+                                st.markdown(f"- **{name}**｜方向：{direction}" + (f"｜關聯：{relation}" if relation else ""))
+                                if reason:
+                                    st.write(f"  可能原因：{reason}")
+                                if evidence:
+                                    st.caption(f"依據：{evidence}")
+                            else:
+                                st.write(f"- {stock}")
+                    else:
+                        st.write(str(related))
+
+                watch_items = ai_row.get("watch_items") or []
+                if isinstance(watch_items, str):
+                    try:
+                        import json
+                        watch_items = json.loads(watch_items)
+                    except (ValueError, TypeError):
+                        watch_items = [watch_items]
+                if watch_items:
+                    st.write("**後續觀察事項**")
+                    if isinstance(watch_items, list):
+                        for watch in watch_items:
+                            if isinstance(watch, dict):
+                                st.write("- " + str(watch.get("item") or watch.get("description") or watch))
+                            else:
+                                st.write(f"- {watch}")
+                    else:
+                        st.write(str(watch_items))
+                if ai_row.get("source_url") and str(ai_row["source_url"]).startswith(("https://", "http://")):
+                    st.markdown(f"[閱讀原文]({ai_row['source_url']})")
+    else:
+        st.info(
+            "資料庫目前沒有可顯示的 AI 分析。請先執行 AI 新聞分析流程；"
+            "這不影響上方的免費規則式產業與個股分析。"
+        )
 
 except Exception as exc:
     st.error("產業與個股分析頁載入失敗。")

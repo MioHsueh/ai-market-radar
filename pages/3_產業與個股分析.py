@@ -529,13 +529,24 @@ try:
 
     # This trend is always calculated from the last 7 Taipei calendar days,
     # regardless of the page's current news-date filter.
-    st.subheader("三、最近 7 天產業熱度變化")
-    seven_day_start = today - pd.Timedelta(days=6)
+
+    st.subheader("三、產業熱度變化")
+    
+    trend_days = st.radio(
+        "統計區間",
+        options=[7, 30],
+        format_func=lambda x: f"最近 {x} 天",
+        horizontal=True,
+        key="industry_trend_days",
+    )
+    
+    trend_start = today - pd.Timedelta(days=trend_days - 1)
+
     
     # 直接從資料庫查詢最近 7 天的新聞
     with st.spinner("正在載入最近 7 天的新聞資料…"):
         seven_day_news = load_news_for_date_range(
-            seven_day_start,
+            trend_start,
             today,
         )
     # Use the same deduplication rule for the heat chart as the headline metrics.
@@ -562,7 +573,7 @@ try:
         )
         # Include dates with no articles in the x-axis by setting a stable date range.
         date_axis = pd.date_range(
-            start=seven_day_start, end=pd.Timestamp(today), freq="D"
+            start=trend_start, end=pd.Timestamp(today), freq="D"
         ).strftime("%Y-%m-%d").tolist()
         heat_fig = px.line(
             heat_counts,
@@ -581,7 +592,7 @@ try:
         )
         st.plotly_chart(heat_fig, use_container_width=True)
         st.caption(
-            f"統計區間：{seven_day_start:%Y-%m-%d} 至 {today:%Y-%m-%d}（台灣時間）。"
+            f"統計區間：{trend_start:%Y-%m-%d} 至 {today:%Y-%m-%d}（台灣時間）。"
             "七天資料依相同網址／標題規則去重；分類可重疊，新聞量代表報導量，不代表股價方向。"
         )
         heat_table = heat_counts.pivot(

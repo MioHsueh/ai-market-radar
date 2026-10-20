@@ -544,7 +544,7 @@ try:
 
     
     # 直接從資料庫查詢最近 7 天的新聞
-    with st.spinner("正在載入最近{trend_days}天的新聞資料…"):
+    with st.spinner(f"正在載入最近 {trend_days} 天的新聞資料…"):
         seven_day_news = load_news_for_date_range(
             trend_start,
             today,

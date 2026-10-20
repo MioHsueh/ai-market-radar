@@ -573,9 +573,10 @@ try:
         )
         # Include dates with no articles in the x-axis by setting a stable date range.
         date_axis = pd.date_range(
-            start=trend_start, end=pd.Timestamp(today), freq="D"
+            start=trend_start,
+            end=pd.Timestamp(today),
+            freq="D",
         ).strftime("%Y-%m-%d").tolist()
-        heat_fig = px.line(
             heat_counts,
             x="日期",
             y="新聞筆數",

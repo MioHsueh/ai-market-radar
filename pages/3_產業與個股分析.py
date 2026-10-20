@@ -364,15 +364,15 @@ st.info(
     "公司被新聞提及不代表必然受惠或受害，判讀仍需核對原文與公司公告。"
 )
 
-with st.expander("AI 分析沒有對應紀錄？在這裡補做今日新聞分析", expanded=False):
+with st.expander("補做今日尚未分析的新聞", expanded=False):
     st.caption(
         "目前個股頁面顯示的 AI 對應筆數為 0，代表資料庫沒有成功配對的分析紀錄。"
         "按下按鈕會呼叫已設定的 Gemini API；每次最多分析 30 則台灣時間今天的新聞。Free tier 仍有速率與用量限制。"
     )
-    if st.button("立即執行今日 AI 分析（最多 30 則）", type="primary", key="run_today_ai_analysis"):
+    if st.button("分析下一批未分析新聞（最多 30 則）", type="primary", key="run_today_ai_analysis"):
         try:
             from services.ai_analysis import generate_today_analyses
-            with st.spinner("正在分析今日新聞並寫入資料庫，請稍候…"):
+            with st.spinner("正在排除已分析新聞，並分析下一批待處理新聞…"):
                 result = generate_today_analyses(max_articles=30)
             st.success(result.get("message", "AI 分析流程已完成。"))
             if result.get("errors"):

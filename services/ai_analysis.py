@@ -129,7 +129,7 @@ def generate_today_analyses(max_articles=10):
         }
 
     # 先排除今天已經分析過的來源網址，避免重複執行時重複寫入。
-    existing = load_recent_analyses(limit=300)
+    existing = load_recent_analyses(limit=500)
     existing_urls = set()
 
     for item in existing:

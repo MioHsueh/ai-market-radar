@@ -107,6 +107,27 @@ def _parse_json_response(content):
     return data
 
 
+def _normalize_url(value):
+    """正規化網址，忽略常見追蹤參數以避免重複分析。"""
+    from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
+    value = str(value or "").strip()
+    if not value:
+        return ""
+    try:
+        p = urlsplit(value)
+        query = [(k, v) for k, v in parse_qsl(p.query, keep_blank_values=True)
+                 if k.casefold() not in {"fbclid", "gclid", "mc_cid", "mc_eid"}
+                 and not k.casefold().startswith("utm_")]
+        return urlunsplit((p.scheme.casefold(), p.netloc.casefold(), p.path.rstrip("/"), urlencode(query, doseq=True), ""))
+    except ValueError:
+        return value
+
+
+def _normalize_title(value):
+    import re
+    return re.sub(r"[\W_]+", "", str(value or "").casefold(), flags=re.UNICODE)
+
+
 def generate_today_analyses(max_articles=10):
     """
     分析今天的新聞並寫入 public.analyses。
@@ -129,21 +150,27 @@ def generate_today_analyses(max_articles=10):
             "message": f"台灣時間 {today} 尚無符合日期的新聞。",
         }
 
-    # 先排除今天已經分析過的來源網址，避免重複執行時重複寫入。
-    existing = load_recent_analyses(limit=500)
+    # 排除資料庫中已分析過的新聞，不限分析建立日期。
+    # 先比對正規化網址，再以標題作輔助，避免重複呼叫 API。
+    existing = load_recent_analyses(limit=1000)
     existing_urls = set()
+    existing_titles = set()
 
     for item in existing:
-        created_date = _to_taipei_date(item.get("created_at"))
-        source_url = str(item.get("source_url") or "").strip()
+        url_key = _normalize_url(item.get("source_url") or item.get("url"))
+        title_key = _normalize_title(item.get("headline") or item.get("title"))
+        if url_key:
+            existing_urls.add(url_key)
+        if title_key:
+            existing_titles.add(title_key)
 
-        if created_date == today and source_url:
-            existing_urls.add(source_url)
-
-    pending = [
-        item for item in news
-        if not item["url"] or item["url"] not in existing_urls
-    ]
+    pending = []
+    for item in news:
+        url_key = _normalize_url(item.get("url"))
+        title_key = _normalize_title(item.get("title"))
+        if (url_key and url_key in existing_urls) or (title_key and title_key in existing_titles):
+            continue
+        pending.append(item)
 
     # 控制每次執行的 API 用量。
     pending = pending[:max(1, int(max_articles))]
@@ -152,7 +179,7 @@ def generate_today_analyses(max_articles=10):
         return {
             "saved": 0,
             "skipped": len(news),
-            "message": "今天的新聞已經有分析紀錄，沒有新增分析。",
+            "message": f"今天共 {len(news)} 則新聞，已排除既有分析，沒有新的待分析新聞。",
         }
 
     client = genai.Client(api_key=api_key)

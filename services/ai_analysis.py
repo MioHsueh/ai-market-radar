@@ -204,12 +204,22 @@ def generate_today_analyses(max_articles=10):
 5. 若沒有足夠證據，related_stocks 回傳空陣列。
 6. market 只能填 TW 或 US；無法確認時不要猜測。
 
-【四、後續觀察】
+【四、個股影響與消息方向】
+1. sentiment 只能是「利多」、「利空」、「中性」或「資訊不足」。
+2. sentiment_reason 必須簡短說明判斷理由，且要能對應新聞內容。
+3. sentiment_evidence 必須摘述標題或摘要中支持判斷的具體事實；不得編造引文。
+4. 以新聞事件對相關公司的基本面／市場預期可能造成的影響判讀，不要把新聞語氣直接等同股價方向。
+5. 同一事件可能同時有正反面影響時，判為「中性」並說明兩面因素；證據不足時判為「資訊不足」。
+6. sentiment_confidence 只能是「高」、「中」、「低」。若新聞只有標題或缺乏具體事實，信心應偏低。
+7. related_stocks 只列明確涉及或有具體證據可支持關聯的公司。把「新聞直接提及」與「可能的間接影響」分開說明；沒有足夠證據就回傳空陣列。
+8. 每檔股票需提供 impact_direction（利多／利空／中性／資訊不足）及 reason。不得因同產業就直接認定受惠或受害。
+
+【五、後續觀察】
 1. watch_items 必須是可查證的後續觀察事項。
 2. 不要將一般性的投資建議當成新聞事實。
 3. 不得承諾股價方向或報酬。
 
-【五、輸出格式】
+【六、輸出格式】
 只輸出合法 JSON，不要輸出其他文字。
 每則新聞必須保留輸入的 id，且不可增加不存在的新聞。
 
@@ -220,14 +230,21 @@ def generate_today_analyses(max_articles=10):
       "headline": "分析標題",
       "summary": "已確認事實與必要的資訊限制",
       "industry": "上述分類之一",
+      "sentiment": "利多／利空／中性／資訊不足",
+      "sentiment_reason": "判斷理由",
+      "sentiment_evidence": "新聞內容中的具體依據",
+      "sentiment_confidence": "高／中／低",
       "industry_impact": "已知事實、可能影響、推論依據",
       "related_stocks": [
         {
           "name": "公司名稱",
           "ticker": "已確認的股票代號，否則填待確認",
           "market": "TW 或 US",
-          "reason": "具體關聯依據",
-          "evidence_type": "新聞事實或 AI 推論"
+          "relation_type": "新聞直接提及／有證據支持的間接影響",
+          "impact_direction": "利多／利空／中性／資訊不足",
+          "reason": "具體關聯與可能影響原因",
+          "evidence_type": "新聞事實或 AI 推論",
+          "evidence": "支持此關聯的新聞依據"
         }
       ],
       "watch_items": [
@@ -284,6 +301,11 @@ def generate_today_analyses(max_articles=10):
                     result.get("headline") or source["title"]
                 )[:300],
                 "summary": str(result.get("summary") or ""),
+                "industry": str(result.get("industry") or "其他"),
+                "sentiment": str(result.get("sentiment") or "資訊不足"),
+                "sentiment_reason": str(result.get("sentiment_reason") or "未提供明確判讀理由"),
+                "sentiment_evidence": str(result.get("sentiment_evidence") or "新聞未提供足夠的具體依據"),
+                "sentiment_confidence": str(result.get("sentiment_confidence") or "低"),
                 "industry_impact": str(
                     result.get("industry_impact") or ""
                 ),

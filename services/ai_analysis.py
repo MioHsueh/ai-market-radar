@@ -15,8 +15,7 @@ from services.storage import (
 )
 
 TAIPEI = ZoneInfo("Asia/Taipei")
-DEFAULT_MODEL = "gemini-2.5-flash"
-
+DEFAULT_MODEL = "gemini-3.5-flash-lite"
 
 def _get_api_key():
     """優先讀取 Streamlit Secrets，再讀取環境變數。"""

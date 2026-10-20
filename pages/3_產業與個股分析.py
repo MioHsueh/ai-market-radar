@@ -367,7 +367,7 @@ st.info(
 with st.expander("AI 分析沒有對應紀錄？在這裡補做今日新聞分析", expanded=False):
     st.caption(
         "目前個股頁面顯示的 AI 對應筆數為 0，代表資料庫沒有成功配對的分析紀錄。"
-        "按下按鈕才會呼叫已設定的 OpenAI API；每次最多分析 30 則今天的新聞，可能產生 API 費用。"
+        "按下按鈕會呼叫已設定的 Gemini API；每次最多分析 30 則台灣時間今天的新聞。Free tier 仍有速率與用量限制。"
     )
     if st.button("立即執行今日 AI 分析（最多 30 則）", type="primary", key="run_today_ai_analysis"):
         try:
@@ -381,7 +381,7 @@ with st.expander("AI 分析沒有對應紀錄？在這裡補做今日新聞分�
                         st.write(error)
             st.rerun()
         except Exception as exc:
-            st.error("今日 AI 分析執行失敗。請確認 OPENAI_API_KEY、資料庫欄位及服務模組。")
+            st.error("今日 AI 分析執行失敗。請確認 GEMINI_API_KEY、模型可用性、資料庫欄位及服務模組。")
             st.code(f"{type(exc).__name__}: {str(exc)[:1000]}")
 
 today = taipei_today()
@@ -515,6 +515,18 @@ try:
             "ai_industry_impact": str((ai_item or {}).get("industry_impact") or ""),
             "ai_matched": bool(ai_item),
         })
+
+    # Overall AI coverage for the selected news date range.
+    ai_covered = sum(bool(row.get("ai_matched")) for row in analyzed_rows)
+    ai_coverage_pct = (ai_covered / len(analyzed_rows) * 100) if analyzed_rows else 0
+    st.divider()
+    st.subheader("AI 分析覆蓋率")
+    cov1, cov2, cov3 = st.columns(3)
+    cov1.metric("目前範圍新聞", f"{len(analyzed_rows):,} 則")
+    cov2.metric("已配對 AI 分析", f"{ai_covered:,} 則")
+    cov3.metric("AI 覆蓋率", f"{ai_coverage_pct:.1f}%")
+    st.progress(min(max(ai_coverage_pct / 100, 0.0), 1.0))
+    st.caption("覆蓋率以目前選取日期範圍內、成功依網址或標題配對到資料庫 AI 分析的新聞計算；未配對新聞仍使用規則式判讀。")
 
     tw_count = sum(
         str(item.get("market") or "").upper() == "TW" for item in news
@@ -928,7 +940,7 @@ try:
     st.subheader("六、AI 個股影響分析與利多／利空判讀")
     st.caption(
         "此區顯示資料庫中由 AI 分析流程產生的結果；與上方依關鍵字計算的規則式判讀分開呈現。"
-        "AI 結果仍需核對原始新聞及公司公告，不代表股價必然朝該方向變動。"
+        "每則分析分開呈現新聞方向與股價可能反應；AI 結果仍需核對原始新聞及公司公告，不代表股價必然朝該方向變動。"
     )
     try:
         ai_analyses = load_recent_analyses(limit=100)
@@ -971,8 +983,14 @@ try:
                 if ai_row.get("sentiment_evidence"):
                     st.write("**判斷依據**")
                     st.write(ai_row["sentiment_evidence"])
+                st.write("**一、新聞方向（基本面／市場預期）**")
+                st.write(f"{sentiment}：此欄只代表新聞內容可能傳達的方向，不等於股價漲跌。")
+                st.write("**二、股價可能反應（獨立判斷）**")
+                st.write(str(ai_row.get("price_impact") or "無法判斷"))
+                if ai_row.get("price_impact_reason"):
+                    st.caption(str(ai_row["price_impact_reason"]))
                 if ai_row.get("industry_impact"):
-                    st.write("**可能的產業／股價影響**")
+                    st.write("**三、可能的產業影響路徑（事實與推論需分開）**")
                     st.write(ai_row["industry_impact"])
 
                 related = ai_row.get("related_stocks") or []

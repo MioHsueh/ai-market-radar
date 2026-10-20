@@ -572,18 +572,25 @@ try:
             .rename(columns={"size": "新聞筆數"})
         )
         # Include dates with no articles in the x-axis by setting a stable date range.
+
         date_axis = pd.date_range(
             start=trend_start,
             end=pd.Timestamp(today),
             freq="D",
         ).strftime("%Y-%m-%d").tolist()
+
+        heat_fig = px.line(
             heat_counts,
             x="日期",
             y="新聞筆數",
             color="產業主題",
             markers=True,
             category_orders={"日期": date_axis},
-            labels={"日期": "台灣日期", "新聞筆數": "新聞篇數", "產業主題": "產業主題"},
+            labels={
+                "日期": "台灣日期",
+                "新聞筆數": "新聞篇數",
+                "產業主題": "產業主題",
+            },
         )
         heat_fig.update_layout(
             height=420,

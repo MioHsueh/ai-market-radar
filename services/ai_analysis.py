@@ -15,7 +15,7 @@ from services.storage import (
 )
 
 TAIPEI = ZoneInfo("Asia/Taipei")
-DEFAULT_MODEL = "gemini-2.5-flash-lite"
+DEFAULT_MODEL = "gemini-3.5-flash-lite"
 
 
 def _get_api_key():

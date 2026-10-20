@@ -5,7 +5,8 @@ from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 import streamlit as st
-from openai import OpenAI
+from google import genai
+from google.genai import types
 
 from services.storage import (
     load_recent_news,
@@ -14,17 +15,17 @@ from services.storage import (
 )
 
 TAIPEI = ZoneInfo("Asia/Taipei")
-DEFAULT_MODEL = "gpt-4o-mini"
+DEFAULT_MODEL = "gemini-2.5-flash"
 
 
 def _get_api_key():
     """優先讀取 Streamlit Secrets，再讀取環境變數。"""
     try:
-        key = st.secrets.get("OPENAI_API_KEY", "")
+        key = st.secrets.get("GEMINI_API_KEY", "")
     except Exception:
         key = ""
 
-    return key or os.getenv("OPENAI_API_KEY", "")
+    return key or os.getenv("GEMINI_API_KEY", "")
 
 
 def _to_taipei_date(value):
@@ -115,7 +116,7 @@ def generate_today_analyses(max_articles=10):
     api_key = _get_api_key()
     if not api_key:
         raise RuntimeError(
-            "尚未設定 OPENAI_API_KEY。請先到 Streamlit Cloud 的 Secrets 設定。"
+            "尚未設定 GEMINI_API_KEY。請到 Streamlit Cloud → Settings → Secrets 設定。"
         )
 
     today = datetime.now(TAIPEI).date()
@@ -154,8 +155,8 @@ def generate_today_analyses(max_articles=10):
             "message": "今天的新聞已經有分析紀錄，沒有新增分析。",
         }
 
-    client = OpenAI(api_key=api_key)
-    model = os.getenv("OPENAI_MODEL", DEFAULT_MODEL)
+    client = genai.Client(api_key=api_key)
+    model = os.getenv("GEMINI_MODEL", DEFAULT_MODEL)
 
     input_news = []
     for index, item in enumerate(pending, start=1):
@@ -256,20 +257,20 @@ def generate_today_analyses(max_articles=10):
 """
 
 
-    response = client.chat.completions.create(
+    response = client.models.generate_content(
         model=model,
-        temperature=0.2,
-        response_format={"type": "json_object"},
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {
-                "role": "user",
-                "content": json.dumps(input_news, ensure_ascii=False),
-            },
-        ],
+        contents=(
+            system_prompt
+            + "\n\n以下是待分析新聞的 JSON 資料。請依照上方規則，只回傳 JSON：\n"
+            + json.dumps(input_news, ensure_ascii=False)
+        ),
+        config=types.GenerateContentConfig(
+            temperature=0.2,
+            response_mime_type="application/json",
+        ),
     )
 
-    content = response.choices[0].message.content
+    content = response.text
     analyses = _parse_json_response(content)
 
     news_by_id = {

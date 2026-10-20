@@ -157,9 +157,10 @@ def build_daily_report(news, today):
         "",
         "## 一、今日新聞概況",
         "",
-        f"- 台股新聞：{len(tw_news)} 則",
-        f"- 美股新聞：{len(us_news)} 則",
-        f"- 新聞總數：{len(tw_news) + len(us_news)} 則",
+        f"- 台股相關：{len(tw_news)} 則",
+        f"- 美股相關：{len(us_news)} 則",
+        f"- 總經／跨市場：{len(macro_news)} 則",
+        f"- 去重後新聞總數：{len(news)} 則",
         "",
     ]
 
@@ -239,10 +240,28 @@ def build_daily_report(news, today):
                 lines.append(f"- {title}")
     else:
         lines.append("今日尚無符合日期條件的美股新聞。")
-
+   
     lines.extend([
         "",
-        "## 五、閱讀提醒",
+        "## 五、總經／跨市場新聞",
+        "",
+    ])
+
+    if macro_news:
+        for item in macro_news[:30]:
+            title = safe_text(item.get("title"), "未提供標題")
+            url = str(item.get("url") or "").strip()
+
+            if url.startswith(("https://", "http://")):
+                lines.append(f"- [{title}]({url})")
+            else:
+                lines.append(f"- {title}")
+    else:
+        lines.append("今日尚無符合日期條件的美股新聞。")
+        
+    lines.extend([
+        "",
+        "## 六、閱讀提醒",
         "",
         "- 分類依新聞標題及摘要的關鍵字比對產生。",
         "- 同一則新聞可能同時歸入多個主題，因此各分類筆數不能直接相加作為新聞總數。",

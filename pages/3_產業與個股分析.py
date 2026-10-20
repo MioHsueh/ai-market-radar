@@ -358,11 +358,10 @@ st.set_page_config(
 )
 
 st.title("📊 產業與個股分析")
-st.caption("免費規則式分析｜依已匯入新聞分類，不使用付費 AI API")
+st.caption("產業分類與新聞統計採規則式分析；若有對應的資料庫 AI 分析，個股判讀會優先採用 AI 結果。")
 st.info(
-    "分析結果由新聞標題與摘要的關鍵字比對產生。"
-    "公司被新聞提及，不代表該新聞必然影響股價；"
-    "利多／利空標籤僅供初步整理，不構成投資建議。"
+    "系統會先比對 AI 分析中的來源網址（排除常見追蹤參數）及新聞標題；有匹配紀錄時優先使用 AI 判讀，否則才使用規則式關鍵字。"
+    "公司被新聞提及不代表必然受惠或受害，判讀仍需核對原文與公司公告。"
 )
 
 today = taipei_today()
@@ -397,14 +396,31 @@ try:
         )
         st.stop()
 
-    # 優先使用資料庫中的 AI 判讀；沒有對應 AI 紀錄時才退回規則式判讀。
+    # 優先使用資料庫中的 AI 判讀；網址先移除常見追蹤參數，避免同篇新聞因網址參數不同而配對失敗。
+    def canonical_url(value):
+        value = str(value or "").strip()
+        if not value.startswith(("https://", "http://")):
+            return ""
+        try:
+            from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
+            parts = urlsplit(value)
+            kept = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True)
+                    if k.casefold() not in {"fbclid", "gclid", "mc_cid", "mc_eid"}
+                    and not k.casefold().startswith("utm_")]
+            return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path.rstrip("/"), urlencode(kept, doseq=True), ""))
+        except ValueError:
+            return ""
+
+    def normalized_title(value):
+        return re.sub(r"[\W_]+", "", str(value or "").casefold(), flags=re.UNICODE)
+
     ai_by_url = {}
     ai_by_title = {}
     ai_load_note = ""
     try:
         for ai_item in load_recent_analyses(limit=500):
-            ai_url = str(ai_item.get("source_url") or "").strip()
-            ai_title = re.sub(r"[\W_]+", "", str(ai_item.get("headline") or "").casefold(), flags=re.UNICODE)
+            ai_url = canonical_url(ai_item.get("source_url"))
+            ai_title = normalized_title(ai_item.get("headline"))
             if ai_url:
                 ai_by_url[ai_url] = ai_item
             if ai_title:
@@ -424,8 +440,8 @@ try:
         industries = classify_industries(item)
         related_stocks = find_related_stocks(item)
         sentiment, positive_count, negative_count = sentiment_hint(item)
-        title_key = re.sub(r"[\W_]+", "", title.casefold(), flags=re.UNICODE)
-        ai_item = ai_by_url.get(url) or ai_by_title.get(title_key)
+        title_key = normalized_title(title)
+        ai_item = ai_by_url.get(canonical_url(url)) or ai_by_title.get(title_key)
         ai_sentiment = str((ai_item or {}).get("sentiment") or "").strip()
         ai_to_rule = {"利多": "偏正面", "利空": "偏負面", "中性": "中性／需人工確認", "資訊不足": "中性／需人工確認"}
         if ai_sentiment in ai_to_rule:
@@ -477,6 +493,7 @@ try:
             "ai_sentiment_evidence": str((ai_item or {}).get("sentiment_evidence") or ""),
             "ai_confidence": str((ai_item or {}).get("sentiment_confidence") or ""),
             "ai_industry_impact": str((ai_item or {}).get("industry_impact") or ""),
+            "ai_matched": bool(ai_item),
         })
 
     tw_count = sum(
@@ -731,7 +748,11 @@ try:
             m3.metric("偏負面", f"{negative_n:,}")
             m4.metric("中性／需確認", f"{neutral_n:,}")
             st.write("主要涉及主題：" + ("、".join(f"{topic}（{count}）" for topic, count in main_topics) or "未分類"))
-            st.caption("以下列出命中公司關鍵字的原始新聞；摘要是規則式彙整，不是 AI 生成的投資結論。")
+            ai_company_count = sum(bool(row.get("ai_matched")) for row in company_news)
+            st.caption(
+                f"以下列出命中公司關鍵字的原始新聞；其中 {ai_company_count}/{len(company_news)} 則有成功對應 AI 分析，其餘使用規則式判讀。"
+                "新聞提及公司不代表必然受惠或受害。"
+            )
 
             st.markdown("##### 個股影響證據摘要")
             st.dataframe(

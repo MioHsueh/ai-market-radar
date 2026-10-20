@@ -102,17 +102,52 @@ def safe_text(value, fallback="未提供"):
     return text if text else fallback
 
 
+
+def classify_report_market(item):
+    """依新聞內容分類為 TW、US 或 MACRO。"""
+    text = " ".join([
+        str(item.get("title") or ""),
+        str(item.get("summary") or ""),
+    ]).casefold()
+
+    macro_keywords = [
+        "聯準會", "fed", "federal reserve", "利率", "通膨",
+        "cpi", "pce", "gdp", "央行", "匯率", "美元",
+        "美債", "公債", "殖利率", "關稅", "貿易戰",
+        "地緣政治", "制裁", "國際政策", "全球經濟",
+        "匯市", "貨幣政策",
+    ]
+
+    if any(keyword.casefold() in text for keyword in macro_keywords):
+        return "MACRO"
+
+    market = str(item.get("market") or "").upper()
+
+    if market == "TW":
+        return "TW"
+    if market == "US":
+        return "US"
+
+    return "MACRO"
+
+
 # ---------- 產生新聞整理報告 ----------
 
 def build_daily_report(news, today):
-    tw_news = [
-        item for item in news
-        if str(item.get("market") or "").upper() == "TW"
-    ]
-    us_news = [
-        item for item in news
-        if str(item.get("market") or "").upper() == "US"
-    ]
+    tw_news = []
+    us_news = []
+    macro_news = []
+
+    for item in news:
+        market_group = classify_report_market(item)
+
+        if market_group == "TW":
+            tw_news.append(item)
+        elif market_group == "US":
+            us_news.append(item)
+        else:
+            macro_news.append(item)
+
 
     lines = [
         f"# 每日市場新聞整理｜{today.isoformat()}",

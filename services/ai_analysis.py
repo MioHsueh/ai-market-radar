@@ -156,7 +156,7 @@ def generate_today_analyses(max_articles=10):
         }
 
     client = genai.Client(api_key=api_key)
-    model = os.getenv("GEMINI_MODEL", DEFAULT_MODEL)
+    model = DEFAULT_MODEL  # 固定使用指定模型，避免 Secrets 覆蓋成其他模型
 
     input_news = []
     for index, item in enumerate(pending, start=1):

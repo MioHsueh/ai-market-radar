@@ -397,6 +397,21 @@ try:
         )
         st.stop()
 
+    # 優先使用資料庫中的 AI 判讀；沒有對應 AI 紀錄時才退回規則式判讀。
+    ai_by_url = {}
+    ai_by_title = {}
+    ai_load_note = ""
+    try:
+        for ai_item in load_recent_analyses(limit=500):
+            ai_url = str(ai_item.get("source_url") or "").strip()
+            ai_title = re.sub(r"[\W_]+", "", str(ai_item.get("headline") or "").casefold(), flags=re.UNICODE)
+            if ai_url:
+                ai_by_url[ai_url] = ai_item
+            if ai_title:
+                ai_by_title[ai_title] = ai_item
+    except Exception as exc:
+        ai_load_note = str(exc)[:250]
+
     industry_rows = []
     stock_rows = []
     analyzed_rows = []
@@ -409,6 +424,12 @@ try:
         industries = classify_industries(item)
         related_stocks = find_related_stocks(item)
         sentiment, positive_count, negative_count = sentiment_hint(item)
+        title_key = re.sub(r"[\W_]+", "", title.casefold(), flags=re.UNICODE)
+        ai_item = ai_by_url.get(url) or ai_by_title.get(title_key)
+        ai_sentiment = str((ai_item or {}).get("sentiment") or "").strip()
+        ai_to_rule = {"利多": "偏正面", "利空": "偏負面", "中性": "中性／需人工確認", "資訊不足": "中性／需人工確認"}
+        if ai_sentiment in ai_to_rule:
+            sentiment = ai_to_rule[ai_sentiment]
 
         for industry in industries:
             industry_rows.append({
@@ -451,6 +472,11 @@ try:
             "negative_count": negative_count,
             "positive_evidence": sentiment_evidence(item)[0],
             "negative_evidence": sentiment_evidence(item)[1],
+            "ai_sentiment": ai_sentiment,
+            "ai_sentiment_reason": str((ai_item or {}).get("sentiment_reason") or ""),
+            "ai_sentiment_evidence": str((ai_item or {}).get("sentiment_evidence") or ""),
+            "ai_confidence": str((ai_item or {}).get("sentiment_confidence") or ""),
+            "ai_industry_impact": str((ai_item or {}).get("industry_impact") or ""),
         })
 
     tw_count = sum(
@@ -730,6 +756,16 @@ try:
                     f"來源：{row['來源']}"
                 )
                 st.write(f"初步判讀：{row['初步判讀']}")
+                linked_analysis = next((
+                    a for a in analyzed_rows
+                    if a["新聞標題"] == row["新聞標題"]
+                ), {})
+                if linked_analysis.get("ai_sentiment_reason"):
+                    st.write("**AI 判斷原因**：" + linked_analysis["ai_sentiment_reason"])
+                if linked_analysis.get("ai_sentiment_evidence"):
+                    st.caption("AI 判斷依據：" + linked_analysis["ai_sentiment_evidence"])
+                if linked_analysis.get("ai_confidence"):
+                    st.caption("AI 判讀信心程度：" + linked_analysis["ai_confidence"])
                 matching = [
                     keyword for keyword in STOCK_KEYWORDS.get(row["市場"], {}).get(chosen_stock, [])
                     if keyword.casefold() in (
@@ -829,8 +865,14 @@ try:
                     f"正面關鍵字命中：{row['positive_count']}；"
                     f"負面關鍵字命中：{row['negative_count']}"
                 )
+                if row.get("ai_sentiment_reason"):
+                    st.write("AI 判斷原因：" + row["ai_sentiment_reason"])
+                if row.get("ai_sentiment_evidence"):
+                    st.write("AI 判斷依據：" + row["ai_sentiment_evidence"])
+                if row.get("ai_confidence"):
+                    st.caption("AI 判讀信心程度：" + row["ai_confidence"])
                 if row["positive_evidence"]:
-                    st.write("正面判讀依據：" + "、".join(row["positive_evidence"]))
+                    st.write("規則式正面判讀依據：" + "、".join(row["positive_evidence"]))
                 if row["negative_evidence"]:
                     st.write("負面判讀依據：" + "、".join(row["negative_evidence"]))
                 if not row["positive_evidence"] and not row["negative_evidence"]:

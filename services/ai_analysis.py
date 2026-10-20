@@ -15,7 +15,8 @@ from services.storage import (
 )
 
 TAIPEI = ZoneInfo("Asia/Taipei")
-DEFAULT_MODEL = "gemini-3.5-flash-lite"
+DEFAULT_MODEL = "gemini-2.5-flash-lite"
+
 
 def _get_api_key():
     """優先讀取 Streamlit Secrets，再讀取環境變數。"""
@@ -179,6 +180,7 @@ def generate_today_analyses(max_articles=10):
 2. summary 必須先寫新聞已確認的事實，再寫尚未證實的部分。
 3. industry_impact 必須分成「已知事實」與「可能影響／推論」，並說明推論依據。
 4. 不可把可能的影響寫成確定會發生的結果。
+5. 必須分開「新聞本身的基本面方向」與「股價可能反應」；不能把利多新聞直接寫成股價必漲，也不能把利空直接寫成股價必跌。
 
 【二、產業分類】
 1. 每則新聞都要判定一個主要產業。
@@ -214,12 +216,18 @@ def generate_today_analyses(max_articles=10):
 7. related_stocks 只列明確涉及或有具體證據可支持關聯的公司。把「新聞直接提及」與「可能的間接影響」分開說明；沒有足夠證據就回傳空陣列。
 8. 每檔股票需提供 impact_direction（利多／利空／中性／資訊不足）及 reason。不得因同產業就直接認定受惠或受害。
 
-【五、後續觀察】
+【五、新聞方向與股價可能影響（務必分開）】
+1. sentiment 代表新聞事件對公司基本面／市場預期的消息方向，不代表股價方向。
+2. price_impact 只描述股價可能的反應，僅能填「可能偏正面」、「可能偏負面」、「可能中性」、「無法判斷」。
+3. price_impact_reason 必須說明股價反應為何可能與新聞方向不同，例如市場已提前反映、估值、整體市場走勢、消息不確定性；若來源沒有資料，明確說明無法判斷，不可自行補造股價資料。
+4. 不可預測確定漲跌或報酬；缺乏股價／市場背景時，優先填「無法判斷」。
+
+【六、後續觀察】
 1. watch_items 必須是可查證的後續觀察事項。
 2. 不要將一般性的投資建議當成新聞事實。
 3. 不得承諾股價方向或報酬。
 
-【六、輸出格式】
+【七、輸出格式】
 只輸出合法 JSON，不要輸出其他文字。
 每則新聞必須保留輸入的 id，且不可增加不存在的新聞。
 
@@ -234,6 +242,8 @@ def generate_today_analyses(max_articles=10):
       "sentiment_reason": "判斷理由",
       "sentiment_evidence": "新聞內容中的具體依據",
       "sentiment_confidence": "高／中／低",
+      "price_impact": "可能偏正面／可能偏負面／可能中性／無法判斷",
+      "price_impact_reason": "股價可能反應與判斷限制；無法判斷時明確說明",
       "industry_impact": "已知事實、可能影響、推論依據",
       "related_stocks": [
         {
@@ -306,6 +316,8 @@ def generate_today_analyses(max_articles=10):
                 "sentiment_reason": str(result.get("sentiment_reason") or "未提供明確判讀理由"),
                 "sentiment_evidence": str(result.get("sentiment_evidence") or "新聞未提供足夠的具體依據"),
                 "sentiment_confidence": str(result.get("sentiment_confidence") or "低"),
+                "price_impact": str(result.get("price_impact") or "無法判斷"),
+                "price_impact_reason": str(result.get("price_impact_reason") or "來源未提供足夠的股價與市場背景，無法判斷股價反應。"),
                 "industry_impact": str(
                     result.get("industry_impact") or ""
                 ),

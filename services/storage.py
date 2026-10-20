@@ -141,9 +141,9 @@ def load_report_history(limit=30):
     return rows
 
 def load_recent_analyses(limit=30):
-    return _fetch_all("""select headline,summary,industry,industry_impact,
-        sentiment,sentiment_reason,sentiment_evidence,sentiment_confidence,
-        related_stocks,watch_items,source_url,created_at
+    return _fetch_all("""select headline,summary,industry, sentiment, sentiment_reason,
+        sentiment_evidence, sentiment_confidence, price_impact, price_impact_reason,
+        industry_impact,related_stocks,watch_items,source_url,created_at
         from public.analyses order by created_at desc limit %s""", (int(limit),))
 
 def save_news(item):
@@ -250,14 +250,16 @@ def save_news(item):
 def save_analysis(item):
     with _connection() as conn:
         row = conn.execute("""insert into public.analyses
-            (headline,summary,industry,industry_impact,sentiment,sentiment_reason,
-             sentiment_evidence,sentiment_confidence,related_stocks,watch_items,source_url)
-            values (%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s)
+            (headline,summary,industry,sentiment,sentiment_reason,sentiment_evidence,
+             sentiment_confidence,price_impact,price_impact_reason,industry_impact,
+             related_stocks,watch_items,source_url)
+            values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s)
             returning id""",
-            (item["headline"], item.get("summary"), item.get("industry", "其他"),
-             item.get("industry_impact"), item.get("sentiment", "資訊不足"),
-             item.get("sentiment_reason"), item.get("sentiment_evidence"),
-             item.get("sentiment_confidence", "低"),
+            (item["headline"], item.get("summary"), item.get("industry"),
+             item.get("sentiment"), item.get("sentiment_reason"),
+             item.get("sentiment_evidence"), item.get("sentiment_confidence"),
+             item.get("price_impact"), item.get("price_impact_reason"),
+             item.get("industry_impact"),
              json.dumps(item.get("related_stocks", []), ensure_ascii=False),
              json.dumps(item.get("watch_items", []), ensure_ascii=False),
              item.get("source_url"))).fetchone()

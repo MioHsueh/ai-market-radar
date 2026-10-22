@@ -9,7 +9,7 @@ from google import genai
 from services.storage import load_news_for_date_range, load_recent_analyses, save_daily_report
 
 TAIPEI = ZoneInfo("Asia/Taipei")
-DEFAULT_MODEL = "gemini-2.5-flash-lite"
+DEFAULT_MODEL = "gemini-3.5-flash-lite"
 
 
 def _api_key():

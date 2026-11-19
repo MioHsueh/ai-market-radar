@@ -153,6 +153,40 @@ def _normalize_title(value):
     return re.sub(r"[\W_]+", "", str(value or "").casefold(), flags=re.UNICODE)
 
 
+
+def _generate_with_retry(client, *, model, contents, config, max_retries=4):
+    """Gemini 暫時性服務錯誤（503/429/5xx）採指數退避重試。"""
+    retryable_markers = (
+        "429", "500", "502", "503", "504",
+        "UNAVAILABLE", "RESOURCE_EXHAUSTED", "INTERNAL",
+        "DEADLINE_EXCEEDED",
+    )
+
+    for attempt in range(max_retries):
+        try:
+            return client.models.generate_content(
+                model=model,
+                contents=contents,
+                config=config,
+            )
+        except Exception as exc:
+            error_text = str(exc).upper()
+            retryable = any(marker in error_text for marker in retryable_markers)
+
+            if not retryable or attempt == max_retries - 1:
+                raise RuntimeError(
+                    f"Gemini API 呼叫失敗（嘗試 {attempt + 1}/{max_retries} 次）：{exc}"
+                ) from exc
+
+            wait_seconds = 5 * (2 ** attempt)
+            st.warning(
+                f"Gemini 暫時忙碌或限流，{wait_seconds} 秒後自動重試"
+                f"（第 {attempt + 1}/{max_retries - 1} 次）。"
+            )
+            time.sleep(wait_seconds)
+
+    raise RuntimeError("Gemini API 重試後仍未取得回應。")
+
 def generate_today_analyses(max_articles=10):
     """
     分析今天的新聞並寫入 public.analyses。
@@ -319,54 +353,24 @@ def generate_today_analyses(max_articles=10):
 
 
 
-contents = (
-    system_prompt
-    + "\n\n以下是待分析新聞的 JSON 資料。請依照上方規則，只回傳 JSON：\n"
-    + json.dumps(input_news, ensure_ascii=False)
-)
 
-config = types.GenerateContentConfig(
-    temperature=0.2,
-    response_mime_type="application/json",
-)
+    contents = (
+        system_prompt
+        + "\\n\\n以下是待分析新聞的 JSON 資料。請依照上方規則，只回傳 JSON：\\n"
+        + json.dumps(input_news, ensure_ascii=False)
+    )
 
-# Gemini 暫時性服務錯誤，自動重試
-response = None
-max_retries = 4
+    config = types.GenerateContentConfig(
+        temperature=0.2,
+        response_mime_type="application/json",
+    )
 
-for attempt in range(max_retries):
-    try:
-        response = client.models.generate_content(
-            model=model,
-            contents=contents,
-            config=config,
-        )
-        break
-
-    except Exception as exc:
-        error_text = str(exc).upper()
-
-        temporary_error = any(
-            code in error_text
-            for code in ["503", "429", "500", "502", "504", "UNAVAILABLE", "RESOURCE_EXHAUSTED"]
-        )
-
-        if not temporary_error or attempt == max_retries - 1:
-            raise RuntimeError(
-                f"Gemini API 呼叫失敗，已重試 {attempt + 1} 次：{exc}"
-            ) from exc
-
-        wait_seconds = 5 * (2 ** attempt)
-
-        print(
-            f"Gemini 暫時無法服務，第 {attempt + 1} 次重試，"
-            f"{wait_seconds} 秒後再試。"
-        )
-
-        time.sleep(wait_seconds)
-
-if response is None:
-    raise RuntimeError("Gemini API 未取得回應。")
+    response = _generate_with_retry(
+        client,
+        model=model,
+        contents=contents,
+        config=config,
+    )
 
 
     content = response.text
@@ -374,12 +378,13 @@ if response is None:
         analyses = _parse_json_response(content)
     except (ValueError, json.JSONDecodeError):
         # 僅在 JSON 格式錯誤時重試一次，避免因單次格式瑕疵整批失敗。
-        retry_response = client.models.generate_content(
+        retry_response = _generate_with_retry(
+            client,
             model=model,
             contents=(
                 system_prompt
-                + "\n\n請特別注意：上一次輸出格式不合法。這次必須只輸出完整、可被標準 json.loads 解析的 JSON；"
-                  "所有鍵名與字串值都使用雙引號，不可使用註解、Markdown 或尾逗號。\n"
+                + "\\n\\n請特別注意：上一次輸出格式不合法。這次必須只輸出完整、可被標準 json.loads 解析的 JSON；"
+                  "所有鍵名與字串值都使用雙引號，不可使用註解、Markdown 或尾逗號。\\n"
                 + json.dumps(input_news, ensure_ascii=False)
             ),
             config=types.GenerateContentConfig(

@@ -218,7 +218,7 @@ display["漲跌點數"] = display["漲跌點數"].map(
 display["漲跌幅"] = display["漲跌幅"].map(fmt_pct)
 st.dataframe(display, use_container_width=True, hide_index=True)
 
-st.subheader("二、各指數漲跌幅")
+st.subheader("二、當日各指數漲跌幅")
 rank = summary.dropna(subset=["漲跌幅"]).sort_values("漲跌幅", ascending=True)
 if rank.empty:
     st.info("目前沒有足夠的前一交易日資料可計算漲跌幅。")

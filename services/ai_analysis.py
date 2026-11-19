@@ -88,15 +88,39 @@ def load_today_news(limit=200):
 
 
 def _parse_json_response(content):
-    """解析模型回傳的 JSON。"""
-    content = (content or "").strip()
+    """解析 Gemini 回傳的 JSON，容忍 Markdown 包裝與 JSON 前後的說明文字。"""
+    import re
 
-    if content.startswith("```"):
-        content = content.split("\n", 1)[-1]
-        if content.endswith("```"):
-            content = content[:-3].strip()
+    text = str(content or "").strip().lstrip("\ufeff")
+    if not text:
+        raise ValueError("Gemini 沒有回傳內容。")
 
-    data = json.loads(content)
+    # 移除常見 Markdown code fence。
+    text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s*```$", "", text)
+
+    # 有些模型會在 JSON 前後附帶說明；從第一個 JSON 起點嘗試解碼。
+    decoder = json.JSONDecoder()
+    last_error = None
+    for marker in ("{", "["):
+        start = text.find(marker)
+        if start < 0:
+            continue
+        try:
+            data, _ = decoder.raw_decode(text[start:])
+            break
+        except json.JSONDecodeError as exc:
+            last_error = exc
+    else:
+        if last_error:
+            excerpt_start = max(0, last_error.pos - 100)
+            excerpt_end = min(len(text), last_error.pos + 160)
+            excerpt = text[excerpt_start:excerpt_end].replace("\n", " ")
+            raise ValueError(
+                f"Gemini 回傳的 JSON 格式不合法：第 {last_error.lineno} 行、"
+                f"第 {last_error.colno} 欄。錯誤附近內容：{excerpt}"
+            ) from last_error
+        raise ValueError("Gemini 回傳內容中找不到 JSON 物件或陣列。")
 
     if isinstance(data, dict):
         data = data.get("analyses", [])
@@ -307,7 +331,24 @@ def generate_today_analyses(max_articles=10):
     )
 
     content = response.text
-    analyses = _parse_json_response(content)
+    try:
+        analyses = _parse_json_response(content)
+    except (ValueError, json.JSONDecodeError):
+        # 僅在 JSON 格式錯誤時重試一次，避免因單次格式瑕疵整批失敗。
+        retry_response = client.models.generate_content(
+            model=model,
+            contents=(
+                system_prompt
+                + "\n\n請特別注意：上一次輸出格式不合法。這次必須只輸出完整、可被標準 json.loads 解析的 JSON；"
+                  "所有鍵名與字串值都使用雙引號，不可使用註解、Markdown 或尾逗號。\n"
+                + json.dumps(input_news, ensure_ascii=False)
+            ),
+            config=types.GenerateContentConfig(
+                temperature=0.1,
+                response_mime_type="application/json",
+            ),
+        )
+        analyses = _parse_json_response(retry_response.text)
 
     news_by_id = {
         index: item

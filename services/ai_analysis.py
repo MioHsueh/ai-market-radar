@@ -1,6 +1,7 @@
-
 import json
 import os
+import time
+
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
@@ -317,18 +318,56 @@ def generate_today_analyses(max_articles=10):
 """
 
 
-    response = client.models.generate_content(
-        model=model,
-        contents=(
-            system_prompt
-            + "\n\n以下是待分析新聞的 JSON 資料。請依照上方規則，只回傳 JSON：\n"
-            + json.dumps(input_news, ensure_ascii=False)
-        ),
-        config=types.GenerateContentConfig(
-            temperature=0.2,
-            response_mime_type="application/json",
-        ),
-    )
+
+contents = (
+    system_prompt
+    + "\n\n以下是待分析新聞的 JSON 資料。請依照上方規則，只回傳 JSON：\n"
+    + json.dumps(input_news, ensure_ascii=False)
+)
+
+config = types.GenerateContentConfig(
+    temperature=0.2,
+    response_mime_type="application/json",
+)
+
+# Gemini 暫時性服務錯誤，自動重試
+response = None
+max_retries = 4
+
+for attempt in range(max_retries):
+    try:
+        response = client.models.generate_content(
+            model=model,
+            contents=contents,
+            config=config,
+        )
+        break
+
+    except Exception as exc:
+        error_text = str(exc).upper()
+
+        temporary_error = any(
+            code in error_text
+            for code in ["503", "429", "500", "502", "504", "UNAVAILABLE", "RESOURCE_EXHAUSTED"]
+        )
+
+        if not temporary_error or attempt == max_retries - 1:
+            raise RuntimeError(
+                f"Gemini API 呼叫失敗，已重試 {attempt + 1} 次：{exc}"
+            ) from exc
+
+        wait_seconds = 5 * (2 ** attempt)
+
+        print(
+            f"Gemini 暫時無法服務，第 {attempt + 1} 次重試，"
+            f"{wait_seconds} 秒後再試。"
+        )
+
+        time.sleep(wait_seconds)
+
+if response is None:
+    raise RuntimeError("Gemini API 未取得回應。")
+
 
     content = response.text
     try:

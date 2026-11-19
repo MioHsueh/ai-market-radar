@@ -3,8 +3,8 @@ from jobs.fetch_news import main as run_news_import
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-st.set_page_config(page_title="新聞匯入測試｜AI Market Radar", layout="wide")
-st.title("📰 真實新聞匯入測試")
+st.set_page_config(page_title="新聞匯入｜AI Market Radar", layout="wide")
+st.title("📰 真實新聞匯入")
 today = datetime.now(ZoneInfo("Asia/Taipei")).date()
 st.write(f"從一般財經新聞 RSS 來源匯入台股與美股新聞；目標日期為台灣時間今天（{today.isoformat()}）。")
 st.warning("請勿重複按下匯入。只會匯入來源實際提供且發布日期為今天的新聞。")

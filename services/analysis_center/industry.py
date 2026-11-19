@@ -423,7 +423,7 @@ def render():
                 kept = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True)
                         if k.casefold() not in {"fbclid", "gclid", "mc_cid", "mc_eid"}
                         and not k.casefold().startswith("utm_")]
-                return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path.rstrip("/"), urlencode(kept, doseq=True), ""))
+                return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path.rstrip("/") or "/", urlencode(sorted(kept), doseq=True), ""))
             except ValueError:
                 return ""
 
@@ -434,7 +434,7 @@ def render():
         ai_by_title = {}
         ai_load_note = ""
         try:
-            for ai_item in load_recent_analyses(limit=500):
+            for ai_item in load_recent_analyses(limit=5000):
                 ai_url = canonical_url(ai_item.get("source_url"))
                 ai_title = normalized_title(ai_item.get("headline"))
                 if ai_url:

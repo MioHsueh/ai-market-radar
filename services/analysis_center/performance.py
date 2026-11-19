@@ -37,7 +37,7 @@ def render():
                     e.ticker,
                     e.expected_direction,
                     e.baseline_date,
-                    a.impact_grade,
+                    e.analysis_snapshot,
                     o.horizon_days,
                     o.observation_date,
                     o.stock_return_pct,
@@ -45,15 +45,59 @@ def render():
                     o.relative_return_pct,
                     o.status
                 FROM public.stock_review_events e
-                LEFT JOIN public.news_impact_assessments a
-                       ON a.news_url = e.source_url
                 JOIN public.stock_review_observations o
                      ON o.event_id = e.id
                 ORDER BY e.published_at DESC NULLS LAST, e.id, o.horizon_days
                 LIMIT 20000
                 """
             ).fetchall()
-        return pd.DataFrame([dict(r) for r in rows])
+            assessments = conn.execute(
+                """
+                SELECT news_url, headline, impact_grade, assessed_at
+                FROM public.news_impact_assessments
+                ORDER BY assessed_at DESC NULLS LAST
+                LIMIT 10000
+                """
+            ).fetchall()
+
+        def canonical_url(value):
+            from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
+            value = str(value or "").strip()
+            if not value.startswith(("http://", "https://")):
+                return ""
+            try:
+                p = urlsplit(value)
+                ignored = {"fbclid", "gclid", "mc_cid", "mc_eid", "ref", "source"}
+                query = [(k, v) for k, v in parse_qsl(p.query, keep_blank_values=True)
+                         if not k.casefold().startswith("utm_") and k.casefold() not in ignored]
+                return urlunsplit((p.scheme.lower(), p.netloc.lower(), p.path.rstrip("/") or "/",
+                                   urlencode(sorted(query), doseq=True), ""))
+            except ValueError:
+                return ""
+
+        def title_key(value):
+            import re
+            return re.sub(r"[\\W_]+", "", str(value or "").casefold())
+
+        grade_by_url, grade_by_title = {}, {}
+        for item in assessments:
+            grade = item.get("impact_grade")
+            url_key = canonical_url(item.get("news_url"))
+            title = title_key(item.get("headline"))
+            if grade and url_key and url_key not in grade_by_url:
+                grade_by_url[url_key] = grade
+            if grade and title and title not in grade_by_title:
+                grade_by_title[title] = grade
+
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["impact_grade"] = (
+                grade_by_url.get(canonical_url(item.get("source_url")))
+                or grade_by_title.get(title_key(item.get("headline")))
+            )
+            result.append(item)
+        return pd.DataFrame(result)
 
 
     def to_num(series):
